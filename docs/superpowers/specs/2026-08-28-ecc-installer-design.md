@@ -298,8 +298,10 @@ There is no separate runtime env file. The installer never sources or executes
 an existing wrapper while discovering prior state. It accepts an existing
 `<bin-dir>/ecc` as owned only when it is a regular file with the exact shebang
 and ownership marker; otherwise the path is an ownership collision. The
-candidate wrapper passes `sh -n` and is installed through a temporary file and
-same-directory `mv`. The installer has no implicit force-overwrite mode.
+candidate wrapper receives its user execute bit with `chmod u+x`, passes
+`sh -n`, and is installed through a temporary file and same-directory `mv`. The
+installer does not otherwise normalize its permissions and has no implicit
+force-overwrite mode.
 
 ## PATH Policy
 
@@ -517,7 +519,8 @@ a local HTTP server. They cover:
 - Checksum mismatch.
 - Unsupported OS, CPU, bitness, libc, and glibc version.
 - PATH guidance without shell-profile mutation.
-- Successful ECC-only wrapper execution without toolchain exports.
+- Successful direct execution of a generated ECC-only wrapper without
+  toolchain exports.
 - A toolchain wrapper exporting only `CHIPCOMPILER_OSS_CAD_DIR` and
   `CHIPCOMPILER_ICS55_PDK_ROOT`, without modifying `PATH` or exporting
   Yosys-specific variables.
