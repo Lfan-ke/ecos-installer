@@ -1,0 +1,139 @@
+{
+  description = "ECC installer generator";
+
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+  outputs =
+    { self, nixpkgs }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+      inherit (pkgs) lib;
+
+      semver = import ./nix/semver.nix { inherit lib; };
+      loadModel = import ./nix/model.nix { inherit lib semver; };
+      generate = import ./nix/generate.nix { inherit lib; };
+      publish = import ./nix/publish.nix { inherit lib semver; };
+
+      templatePath = ./templates/ecc-installer.sh.in;
+      template = builtins.readFile templatePath;
+      toolchain = builtins.fromTOML (builtins.readFile ./metadata/toolchain.toml);
+      model = loadModel toolchain;
+      generated = generate { inherit template model; };
+
+      eccInstaller = pkgs.writeTextFile {
+        name = "ecc-installer.sh";
+        executable = true;
+        text = generated;
+        checkPhase = ''
+          ${pkgs.dash}/bin/dash -n "$target"
+          ${pkgs.bash}/bin/bash -n "$target"
+        '';
+      };
+
+      publishDecide = pkgs.writeShellApplication {
+        name = "publish-decide";
+        runtimeInputs = [ pkgs.nix ];
+        text = ''
+          current="''${1:-}"
+          candidate="''${2:?candidate installer required}"
+          ${pkgs.nix}/bin/nix-instantiate --eval --strict \
+            --arg pkgsPath ${pkgs.path} \
+            --argstr currentFile "$current" \
+            --argstr candidateFile "$candidate" \
+            ${./nix/decide-cli.nix} | tr -d '"\n '
+        '';
+      };
+
+      updateEcc = pkgs.writeShellApplication {
+        name = "update-ecc";
+        runtimeInputs = [
+          pkgs.nix
+          pkgs.git
+          pkgs.gawk
+          pkgs.gnused
+          pkgs.coreutils
+        ];
+        text = builtins.readFile ./nix/update-ecc.sh;
+      };
+
+      publishOss = pkgs.writeShellApplication {
+        name = "publish-oss";
+        runtimeInputs = [
+          pkgs.curl
+          pkgs.openssl
+          pkgs.coreutils
+          pkgs.gnused
+          pkgs.nix
+        ];
+        text = ''
+          export ECC_INSTALLER=${lib.escapeShellArg (toString eccInstaller)}
+          export PUBLISH_DECIDE=${lib.escapeShellArg "${publishDecide}/bin/publish-decide"}
+          ${builtins.readFile ./nix/publish-oss.sh}
+        '';
+      };
+
+      installerChecks = import ./nix/tests/installer.nix {
+        inherit pkgs;
+        installer = eccInstaller;
+        template = templatePath;
+      };
+    in
+    {
+      packages.${system} = {
+        ecc-installer = eccInstaller;
+        default = eccInstaller;
+      };
+
+      apps.${system} = {
+        update-ecc = {
+          type = "app";
+          program = "${updateEcc}/bin/update-ecc";
+        };
+        publish-oss = {
+          type = "app";
+          program = "${publishOss}/bin/publish-oss";
+        };
+      };
+
+      checks.${system} = {
+        generate = import ./nix/tests/generate.nix {
+          inherit
+            lib
+            pkgs
+            semver
+            loadModel
+            generate
+            publish
+            template
+            toolchain
+            ;
+        };
+        semver = import ./nix/tests/semver.nix { inherit pkgs semver; };
+        archive = import ./nix/tests/archive.nix { inherit pkgs; };
+        publish = import ./nix/tests/publish.nix {
+          inherit
+            pkgs
+            lib
+            publish
+            generate
+            loadModel
+            template
+            toolchain
+            ;
+        };
+        installer-syntax = installerChecks.syntax;
+        installer-e2e = installerChecks.e2e;
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        packages = [
+          pkgs.nixfmt
+          pkgs.dash
+          pkgs.shellcheck
+          pkgs.python3
+          pkgs.curl
+        ];
+      };
+    };
+}

@@ -9,3 +9,6 @@ build/
 .coverage
 htmlcov/
 *.tmp
+result
+result-*
+.direnv/
