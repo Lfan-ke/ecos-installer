@@ -8,8 +8,8 @@ github_repo = "openecos-projects/ecc"
 asset_name = "ecc-cli-linux-x86_64.tar.gz"
 version = "0.1.0-alpha.11"
 url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.11/ecc-cli-linux-x86_64.tar.gz"
-cnb_url_template = "https://cnb.cool/openecos-projects/ecc/-/releases/download/{tag}/{name}"
-cnb_url = "https://cnb.cool/openecos-projects/ecc/-/releases/download/v0.1.0-alpha.11/ecc-cli-linux-x86_64.tar.gz"
+cnb_url_template = "https://cnb.cool/ecoslab/ecc/-/releases/download/{tag}/{name}"
+cnb_url = "https://cnb.cool/ecoslab/ecc/-/releases/download/v0.1.0-alpha.11/ecc-cli-linux-x86_64.tar.gz"
 sha256 = "ef34c53631c902bc6f4a99ec08fcaf2a5815e2d59acb68849ce6895c69e08dba"
 size = 513992667
 
