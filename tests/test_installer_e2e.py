@@ -486,11 +486,35 @@ def test_conflicting_quiet_verbose_and_relative_path(tmp_path, installer):
     assert "absolute path" in relative.stderr
 
 
-def test_cnb_mode_reports_github_toolchain(tmp_path, installer):
+def test_cnb_mode_downloads_toolchain_from_cnb(tmp_path, assets, base, routes):
+    for name in assets:
+        routes[f"/github/{name}"] = {"status": 404}
+    installer = write_generated_installer(make_model(assets, base), tmp_path / "installer.sh")
     env = xdg_env(tmp_path)
     result = run_installer(installer, env, "--download-source", "cnb", "--with-toolchain")
     assert result.returncode == 0, result.stderr
-    assert "no CNB mirror" in result.stderr
+    assert "no CNB mirror" not in result.stderr
+    data = Path(env["XDG_DATA_HOME"]) / "ecc"
+    assert (data / "tools" / "oss-cad-suite" / "20260827" / "bin" / "yosys").is_file()
+
+
+def test_toolchain_github_failure_falls_back_to_cnb(tmp_path, assets, base, routes):
+    routes["/github/oss-cad-suite-linux-x64-20260827.tgz"] = {"status": 500}
+    routes["/github/icsprout55-pdk-v1.10.102.tar.gz"] = {"status": 500}
+    for spec_name in (
+        "ics55_LLSC_H7CH_liberty.tar.bz2",
+        "ics55_LLSC_H7CL_liberty.tar.bz2",
+        "ics55_LLSC_H7CR_liberty.tar.bz2",
+        "ics55_LLSC_H7CH_gds.tar.bz2",
+        "ics55_LLSC_H7CL_gds.tar.bz2",
+        "ics55_LLSC_H7CR_gds.tar.bz2",
+        "ICsprout_55LLULP1233_IO_251013_gds.tar.bz2",
+    ):
+        routes[f"/github/{spec_name}"] = {"status": 500}
+    installer = write_generated_installer(make_model(assets, base), tmp_path / "installer.sh")
+    result = run_installer(installer, xdg_env(tmp_path), "--with-toolchain")
+    assert result.returncode == 0, result.stderr
+    assert "failed to download" in result.stderr
 
 
 def test_github_redirect_stall_falls_back_to_cnb(tmp_path, assets, base, routes):

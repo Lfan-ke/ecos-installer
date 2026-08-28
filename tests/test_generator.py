@@ -17,6 +17,7 @@ def test_identical_input_produces_identical_bytes():
     assert f'ECC_VERSION="{model.ecc_version}"' in first
     assert model.ecc.sha256 in first
     assert model.ecc_cnb_url in first
+    assert model.oss_cad.cnb_url in first
     assert "CHIPCOMPILER_OSS_CAD_DIR" in first
     assert "[[ " not in first
     assert "BASH_SOURCE" not in first
@@ -36,3 +37,4 @@ def test_generated_installer_embeds_liberty_inventory():
     for asset in model.pdk_supplemental:
         assert asset.name in text
         assert asset.dest in text
+        assert asset.cnb_url in text

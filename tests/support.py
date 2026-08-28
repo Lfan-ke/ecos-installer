@@ -293,6 +293,7 @@ def make_model(
                 sha256=packed.sha256,
                 dest=packed.dest,
                 kind=packed.kind,
+                cnb_url=f"{base}/cnb/{packed.name}",
             )
         )
     return ReleaseModel(
@@ -311,6 +312,7 @@ def make_model(
             url=f"{base}/github/{oss.name}",
             sha256=oss.sha256,
             size=len(oss.data),
+            cnb_url=f"{base}/cnb/{oss.name}",
         ),
         pdk_version="v1.10.102",
         pdk_base=Asset(
@@ -318,6 +320,7 @@ def make_model(
             url=f"{base}/github/{pdk_base.name}",
             sha256=pdk_base.sha256,
             size=len(pdk_base.data),
+            cnb_url=f"{base}/cnb/{pdk_base.name}",
         ),
         pdk_supplemental=tuple(supplemental),
         pdk_liberty_files=liberty_paths(),

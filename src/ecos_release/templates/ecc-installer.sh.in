@@ -27,11 +27,13 @@ OSS_CAD_VERSION="@OSS_CAD_VERSION@"
 OSS_CAD_ASSET_NAME="@OSS_CAD_ASSET_NAME@"
 OSS_CAD_SHA256="@OSS_CAD_SHA256@"
 OSS_CAD_URL="@OSS_CAD_URL@"
+OSS_CAD_CNB_URL="@OSS_CAD_CNB_URL@"
 PDK_NAME="@PDK_NAME@"
 PDK_VERSION="@PDK_VERSION@"
 PDK_BASE_ASSET_NAME="@PDK_BASE_ASSET_NAME@"
 PDK_BASE_SHA256="@PDK_BASE_SHA256@"
 PDK_BASE_URL="@PDK_BASE_URL@"
+PDK_BASE_CNB_URL="@PDK_BASE_CNB_URL@"
 PDK_TECH_LEF="@PDK_TECH_LEF@"
 WRAPPER_MARKER="# ecos-release-wrapper-v1"
 
@@ -73,7 +75,7 @@ OPTIONS:
             Install OSS CAD Suite and the ICS55 PDK
 
         --download-source auto|github|cnb
-            Select ECC download source (default: auto)
+            Select download source for mirrored assets (default: auto)
 
 ENVIRONMENT:
     ECC_WITH_TOOLCHAIN=0|1
@@ -546,18 +548,35 @@ download_verified() {
     err "failed to download $_name"
 }
 
-download_ecc() {
+download_by_source() {
+    local _sha="$1"
+    local _name="$2"
+    local _github="$3"
+    local _cnb="$4"
     case "$DOWNLOAD_SOURCE" in
         auto)
-            download_verified "$ECC_SHA256" "$ECC_ASSET_NAME" "$ECC_GITHUB_URL" "$ECC_CNB_URL"
+            if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
+                download_verified "$_sha" "$_name" "$_github" "$_cnb"
+            else
+                download_verified "$_sha" "$_name" "$_github"
+            fi
             ;;
         github)
-            download_verified "$ECC_SHA256" "$ECC_ASSET_NAME" "$ECC_GITHUB_URL"
+            download_verified "$_sha" "$_name" "$_github"
             ;;
         cnb)
-            download_verified "$ECC_SHA256" "$ECC_ASSET_NAME" "$ECC_CNB_URL"
+            if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
+                download_verified "$_sha" "$_name" "$_cnb"
+            else
+                say "no CNB URL for $_name; downloading from GitHub"
+                download_verified "$_sha" "$_name" "$_github"
+            fi
             ;;
     esac
+}
+
+download_ecc() {
+    download_by_source "$ECC_SHA256" "$ECC_ASSET_NAME" "$ECC_GITHUB_URL" "$ECC_CNB_URL"
 }
 
 acquire_lock() {
@@ -811,11 +830,12 @@ install_oss_cad() {
 prefetch_pdk_supplementals() {
     local _name
     local _sha
-    local _url
+    local _github
+    local _cnb
     local _dest
-    while IFS="$(printf '\t')" read -r _name _sha _url _dest || [ -n "${_name:-}" ]; do
+    while IFS="$(printf '\t')" read -r _name _sha _github _cnb _dest || [ -n "${_name:-}" ]; do
         [ -n "$_name" ] || continue
-        download_verified "$_sha" "$_name" "$_url" >/dev/null
+        download_by_source "$_sha" "$_name" "$_github" "$_cnb" >/dev/null
     done <<'PDK_ASSETS'
 @PDK_ASSET_TABLE@
 PDK_ASSETS
@@ -825,13 +845,14 @@ extract_pdk_supplementals() {
     local _root="$1"
     local _name
     local _sha
-    local _url
+    local _github
+    local _cnb
     local _dest
     local _archive
     local _target
-    while IFS="$(printf '\t')" read -r _name _sha _url _dest || [ -n "${_name:-}" ]; do
+    while IFS="$(printf '\t')" read -r _name _sha _github _cnb _dest || [ -n "${_name:-}" ]; do
         [ -n "$_name" ] || continue
-        _archive="$(download_verified "$_sha" "$_name" "$_url")"
+        _archive="$(download_by_source "$_sha" "$_name" "$_github" "$_cnb")"
         _target="${_root}/${_dest}"
         ensure mkdir -p "$_target"
         extract_archive "$_archive" "$_target"
@@ -959,17 +980,14 @@ main() {
     check_wrapper_collision
     if [ "$WITH_TOOLCHAIN" = 1 ]; then
         need_cmd bzip2
-        if [ "$DOWNLOAD_SOURCE" = cnb ]; then
-            say "OSS CAD Suite and ICS55 PDK have no CNB mirror; downloading them from GitHub"
-        fi
     fi
 
     ECC_ARCHIVE="$(download_ecc)"
     OSS_ARCHIVE=""
     PDK_ARCHIVE=""
     if [ "$WITH_TOOLCHAIN" = 1 ]; then
-        OSS_ARCHIVE="$(download_verified "$OSS_CAD_SHA256" "$OSS_CAD_ASSET_NAME" "$OSS_CAD_URL")"
-        PDK_ARCHIVE="$(download_verified "$PDK_BASE_SHA256" "$PDK_BASE_ASSET_NAME" "$PDK_BASE_URL")"
+        OSS_ARCHIVE="$(download_by_source "$OSS_CAD_SHA256" "$OSS_CAD_ASSET_NAME" "$OSS_CAD_URL" "$OSS_CAD_CNB_URL")"
+        PDK_ARCHIVE="$(download_by_source "$PDK_BASE_SHA256" "$PDK_BASE_ASSET_NAME" "$PDK_BASE_URL" "$PDK_BASE_CNB_URL")"
         prefetch_pdk_supplementals
     fi
 

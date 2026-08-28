@@ -34,6 +34,7 @@ class Asset:
     size: int | None = None
     dest: str | None = None
     kind: str = "archive"
+    cnb_url: str = ""
 
     def __post_init__(self) -> None:
         if not self.name or "/" in self.name or "\\" in self.name:
@@ -160,6 +161,7 @@ def assets_from_pdk_metadata(data: dict[str, Any]) -> tuple[Asset, ...]:
                 size=item.get("size"),
                 dest=item["dest"],
                 kind=item.get("kind", "archive"),
+                cnb_url=item.get("cnb_url", ""),
             )
         )
     return tuple(assets)

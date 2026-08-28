@@ -21,11 +21,13 @@ PLACEHOLDERS = (
     "OSS_CAD_ASSET_NAME",
     "OSS_CAD_SHA256",
     "OSS_CAD_URL",
+    "OSS_CAD_CNB_URL",
     "PDK_NAME",
     "PDK_VERSION",
     "PDK_BASE_ASSET_NAME",
     "PDK_BASE_SHA256",
     "PDK_BASE_URL",
+    "PDK_BASE_CNB_URL",
     "PDK_TECH_LEF",
     "PDK_CELL_LEFS",
     "PDK_ASSET_TABLE",
@@ -49,11 +51,13 @@ def generate_installer(model: ReleaseModel) -> str:
         "OSS_CAD_ASSET_NAME": model.oss_cad.name,
         "OSS_CAD_SHA256": model.oss_cad.sha256,
         "OSS_CAD_URL": model.oss_cad.url,
+        "OSS_CAD_CNB_URL": model.oss_cad.cnb_url,
         "PDK_NAME": model.pdk_name,
         "PDK_VERSION": model.pdk_version,
         "PDK_BASE_ASSET_NAME": model.pdk_base.name,
         "PDK_BASE_SHA256": model.pdk_base.sha256,
         "PDK_BASE_URL": model.pdk_base.url,
+        "PDK_BASE_CNB_URL": model.pdk_base.cnb_url,
         "PDK_TECH_LEF": model.pdk_tech_lef,
         "PDK_CELL_LEFS": _join_lines(model.pdk_cell_lefs),
         "PDK_ASSET_TABLE": _asset_table(model),
@@ -90,7 +94,17 @@ def _asset_table(model: ReleaseModel) -> str:
     for asset in model.pdk_supplemental:
         if not asset.dest:
             raise RuntimeError(f"PDK asset {asset.name} is missing dest")
-        rows.append("\t".join((asset.name, asset.sha256, asset.url, asset.dest)))
+        rows.append(
+            "\t".join(
+                (
+                    asset.name,
+                    asset.sha256,
+                    asset.url,
+                    asset.cnb_url or "-",
+                    asset.dest,
+                )
+            )
+        )
     return "\n".join(rows)
 
 
