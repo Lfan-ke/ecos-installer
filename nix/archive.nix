@@ -83,6 +83,16 @@ let
     sha256 = model.pdk.base.sha256;
   };
 
+  pdkBaseCnb =
+    if model.pdk.base.cnbUrl == "" then
+      null
+    else
+      checkArchive {
+        name = "cnb-${model.pdk.base.name}";
+        url = model.pdk.base.cnbUrl;
+        sha256 = model.pdk.base.cnbSha256;
+      };
+
   pdkAssets = map (
     a:
     checkArchive {
@@ -114,6 +124,7 @@ in
     ossCnb
     pdkBase
   ]
+  ++ lib.optional (pdkBaseCnb != null) pdkBaseCnb
   ++ pdkAssets
   ++ pdkCnb;
 }

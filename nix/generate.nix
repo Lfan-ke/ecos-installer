@@ -27,6 +27,7 @@ let
     "PDK_BASE_SHA256"
     "PDK_BASE_URL"
     "PDK_BASE_CNB_URL"
+    "PDK_BASE_CNB_SHA256"
     "PDK_TECH_LEF"
     "PDK_CELL_LEFS"
     "PDK_ASSET_TABLE"
@@ -66,6 +67,7 @@ let
     PDK_BASE_SHA256 = model.pdk.base.sha256;
     PDK_BASE_URL = model.pdk.base.url;
     PDK_BASE_CNB_URL = model.pdk.base.cnbUrl;
+    PDK_BASE_CNB_SHA256 = model.pdk.base.cnbSha256;
     PDK_TECH_LEF = model.pdk.techLef;
     PDK_CELL_LEFS = joinLines model.pdk.cellLefs;
     PDK_ASSET_TABLE = joinLines (map assetRow model.pdk.assets);

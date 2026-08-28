@@ -27,6 +27,8 @@ version = "v1.10.102"
 base_name = "icsprout55-pdk-v1.10.102.tar.gz"
 base_url = "https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.102.tar.gz"
 base_sha256 = "68f81ab68ff0e1e7f41ce0c7e1088605f08cd89acdd8dcfd7594b801c98a3074"
+base_cnb_url = "https://cnb.cool/ecoslab/icsprout55-pdk/-/git/archive/v1.10.102.tar.gz"
+base_cnb_sha256 = "9bd412cee21a3b89dad0765723b5d4fba2936c41b1bbea1600eba7ba192221ad"
 tech_lef = "prtech/techLEF/N551P6M_ecos.lef"
 cell_lefs = [
   "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef",

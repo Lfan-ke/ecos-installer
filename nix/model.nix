@@ -84,7 +84,8 @@ let
         name = pdk.base_name or "";
         url = pdk.base_url or "";
         sha256 = requireHex "pdk-base" (pdk.base_sha256 or "");
-        cnbUrl = pdk.cnb_url or "";
+        cnbUrl = pdk.base_cnb_url or "";
+        cnbSha256 = pdk.base_cnb_sha256 or "";
       };
       techLef = requireRelative "tech lef" (pdk.tech_lef or "");
       cellLefs = map (requireRelative "cell lef") (pdk.cell_lefs or [ ]);
@@ -124,8 +125,12 @@ else if builtins.length model.pdk.assets != 7 then
   throwUn "ICS55 PDK requires 7 supplemental assets"
 else if model.pdk.libertyFiles == [ ] then
   throwUn "PDK liberty_files is empty"
-else if model.pdk.base.cnbUrl != "" then
-  throwUn "PDK base archive must not have cnb_url"
+else if
+  model.pdk.base.cnbUrl != "" && (builtins.match "[0-9a-f]{64}" model.pdk.base.cnbSha256 == null)
+then
+  throwUn "PDK base cnb_url requires base_cnb_sha256"
+else if model.pdk.base.cnbUrl == "" && model.pdk.base.cnbSha256 != "" then
+  throwUn "PDK base_cnb_sha256 set without base_cnb_url"
 else if !(builtins.all (n: builtins.any (a: a.name == n) model.pdk.assets) libertyNames) then
   throwUn "missing Liberty archive"
 else if builtins.length model.pdk.cellLefs < 2 then

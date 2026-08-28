@@ -36,6 +36,7 @@ PDK_BASE_ASSET_NAME="@PDK_BASE_ASSET_NAME@"
 PDK_BASE_SHA256="@PDK_BASE_SHA256@"
 PDK_BASE_URL="@PDK_BASE_URL@"
 PDK_BASE_CNB_URL="@PDK_BASE_CNB_URL@"
+PDK_BASE_CNB_SHA256="@PDK_BASE_CNB_SHA256@"
 PDK_TECH_LEF="@PDK_TECH_LEF@"
 WRAPPER_MARKER="# ecos-release-wrapper-v1"
 
@@ -506,7 +507,7 @@ curl_fetch() {
     fi
 }
 
-download_verified() {
+try_download_verified() {
     local _sha="$1"
     local _name="$2"
     shift 2
@@ -524,6 +525,7 @@ download_verified() {
         rm -f "$_cache"
     fi
     for _url in "$@"; do
+        [ -n "$_url" ] && [ "$_url" != "-" ] || continue
         say "downloading $_name"
         say_verbose "  from $_url"
         _part="$(mktemp "${CACHE_DOWNLOADS}/partial.XXXXXX")"
@@ -550,6 +552,14 @@ download_verified() {
         PARTIAL_FILE=""
         say "failed to download $_url"
     done
+    return 1
+}
+
+download_verified() {
+    local _name="$2"
+    if try_download_verified "$@"; then
+        return 0
+    fi
     err "failed to download $_name"
 }
 
@@ -573,13 +583,28 @@ download_by_source() {
     local _name="$2"
     local _github="$3"
     local _cnb="$4"
+    local _cnb_sha="${5:-}"
     _github="$(rewrite_github_url "$_github")"
+    if [ -z "$_cnb_sha" ]; then
+        _cnb_sha="$_sha"
+    fi
     case "$DOWNLOAD_SOURCE" in
         auto)
-            if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
-                download_verified "$_sha" "$_name" "$_github" "$_cnb"
+            if [ "$_cnb_sha" = "$_sha" ]; then
+                if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
+                    download_verified "$_sha" "$_name" "$_github" "$_cnb"
+                else
+                    download_verified "$_sha" "$_name" "$_github"
+                fi
             else
-                download_verified "$_sha" "$_name" "$_github"
+                if try_download_verified "$_sha" "$_name" "$_github"; then
+                    return 0
+                fi
+                if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
+                    download_verified "$_cnb_sha" "$_name" "$_cnb"
+                else
+                    err "failed to download $_name"
+                fi
             fi
             ;;
         github)
@@ -587,7 +612,7 @@ download_by_source() {
             ;;
         cnb)
             if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
-                download_verified "$_sha" "$_name" "$_cnb"
+                download_verified "$_cnb_sha" "$_name" "$_cnb"
             else
                 say "no CNB URL for $_name; downloading from GitHub"
                 download_verified "$_sha" "$_name" "$_github"
@@ -1009,7 +1034,7 @@ main() {
     PDK_ARCHIVE=""
     if [ "$WITH_TOOLCHAIN" = 1 ]; then
         OSS_ARCHIVE="$(download_by_source "$OSS_CAD_SHA256" "$OSS_CAD_ASSET_NAME" "$OSS_CAD_URL" "$OSS_CAD_CNB_URL")"
-        PDK_ARCHIVE="$(download_by_source "$PDK_BASE_SHA256" "$PDK_BASE_ASSET_NAME" "$PDK_BASE_URL" "$PDK_BASE_CNB_URL")"
+        PDK_ARCHIVE="$(download_by_source "$PDK_BASE_SHA256" "$PDK_BASE_ASSET_NAME" "$PDK_BASE_URL" "$PDK_BASE_CNB_URL" "$PDK_BASE_CNB_SHA256")"
         prefetch_pdk_supplementals
     fi
 
