@@ -410,8 +410,10 @@ ECC installation follows these phases:
    previously nonexistent version directory.
 10. Install and validate the requested optional toolchain while the existing
     wrapper remains unchanged.
-11. Generate an ECC-only wrapper, or a toolchain wrapper when the requested or
-    already installed expected toolchain versions validate.
+11. Only after every component requested by this invocation validates, generate
+    an ECC-only wrapper or a toolchain wrapper as appropriate. A default install
+    may continue selecting already installed expected toolchain versions only
+    when they independently validate.
 12. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
     commit point.
 13. Atomically write the global receipt. Failure here produces a warning only.
@@ -431,18 +433,21 @@ Installing a fixed older version is supported by running that version's
 installer. Users may also execute an installed older version directly at
 `<data-root>/<version>/ecc`.
 
-Except for the explicitly handled optional-toolchain degradation described
-below, any failure before wrapper replacement leaves the existing current ECC
-unchanged. A trap removes temporary files and releases the owned lock without
-deleting verified cache entries or prior installed versions.
+Any failure before wrapper replacement leaves the existing wrapper and receipt
+unchanged. A failed first installation creates neither. A trap removes temporary
+files, incomplete staging directories, and the owned lock without deleting
+verified cache entries, prior installed versions, or complete version directories
+that this invocation already validated and promoted for reuse.
 
 ## Optional Toolchain Installation
 
 `--with-toolchain` installs OSS CAD Suite and the ICS55 PDK after the ECC bundle
-has passed its validation but before the wrapper commit. A toolchain failure does
-not discard a successfully staged ECC CLI: the installer commits an ECC-only
-wrapper, returns nonzero, and clearly reports that ECC succeeded while the
-optional toolchain failed.
+has passed its validation but before the wrapper commit. The installer creates or
+replaces the wrapper only after ECC, OSS CAD Suite, and the PDK all validate. A
+toolchain failure returns nonzero and leaves the existing wrapper and receipt
+unchanged; on a first installation it creates neither. Fully validated version
+directories may remain for a later retry; incomplete staging directories are
+removed.
 
 An ECC-only install leaves existing toolchain directories untouched. If the
 expected OSS CAD Suite and PDK versions already pass the validations below, the
@@ -526,7 +531,9 @@ a local HTTP server. They cover:
   Yosys-specific variables.
 - An ECC-only upgrade preserving an already installed, validated expected
   toolchain in the new wrapper.
-- Failed upgrade preserving the existing wrapper and current version.
+- Any failure before commit during a first installation leaving no wrapper or
+  receipt.
+- Failed upgrade preserving the existing wrapper, receipt, and current version.
 - A corrupted same-version directory failing without changing the wrapper or
   installed files.
 - Three successful versions remaining installed while the wrapper selects the
@@ -542,8 +549,8 @@ a local HTTP server. They cover:
 - Shadowed `ecc` detection and `XDG_CONFIG_HOME` receipt placement.
 - Runtime checksum binding to publication-validated archive bytes and rejection
   of unexpected post-extraction filesystem object types.
-- Toolchain failure committing a working ECC-only wrapper and preserving any
-  existing complete toolchain directories.
+- Toolchain failure preserving the existing wrapper and receipt while retaining
+  only complete, validated version directories for reuse.
 - Real Yosys version and Slang frontend probes in the candidate environment.
 - Validation of every Liberty member in all three PDK Liberty archives.
 
@@ -623,6 +630,7 @@ version remains supported at its versioned URL but never downgrades `latest`.
 - Every installed archive is verified against release-derived SHA-256 metadata.
 - Failed downloads, validation, extraction, or smoke tests do not replace the
   existing working ECC wrapper.
+- A failed first installation does not create a wrapper or receipt.
 - A corrupted same-version install fails without changing the active wrapper or
   installed directory.
 - Concurrent installer invocations using the same data root cannot overlap
@@ -631,7 +639,8 @@ version remains supported at its versioned URL but never downgrades `latest`.
 - A successful install writes a non-authoritative global receipt after switching
   the wrapper; receipt failure does not break the installed ECC.
 - `--with-toolchain` installs shared tools and PDK data below the ECC data root
-  and does not globally shadow Yosys.
+  and does not globally shadow Yosys. It creates or replaces the wrapper only
+  after ECC and both toolchain components validate.
 - The wrapper exports only the managed OSS CAD Suite and PDK roots. It does not
   modify `PATH`, export Yosys-specific variables, or affect the calling shell.
 - PDK validation checks every Liberty member supplied by all three Liberty
