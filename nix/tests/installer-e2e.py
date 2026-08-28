@@ -1009,6 +1009,21 @@ def test_bash_install(h: Harness) -> None:
         fail("bash install missing wrapper")
 
 
+def test_github_base_url(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    env["ECC_GITHUB_BASE_URL"] = h.base
+    installer = h.installer(
+        root / "installer.sh",
+        ecc_github="https://github.com/github/ecc-cli-linux-x86_64.tar.gz",
+    )
+    result = run_installer(installer, env, "--download-source", "github")
+    if result.returncode != 0:
+        fail(result.stderr)
+    if not (roots(env)[1] / "ecc").is_file():
+        fail("proxied GitHub download did not install")
+
+
 CASES = [
     test_syntax,
     test_github_success,
@@ -1036,6 +1051,7 @@ CASES = [
     test_toolchain_github_fallback,
     test_redirect_stall_falls_back,
     test_bash_install,
+    test_github_base_url,
 ]
 
 

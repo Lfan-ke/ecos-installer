@@ -83,6 +83,9 @@ ENVIRONMENT:
     ECC_WITH_TOOLCHAIN=0|1
     ECC_DOWNLOAD_SOURCE=auto|github|cnb
     ECC_INSTALL_DIR=/absolute/path/to/ecc-data
+    ECC_GITHUB_BASE_URL=https://ghfast.top/https://github.com
+            Replace the https://github.com prefix of GitHub asset URLs.
+            CNB URLs are unchanged.
 EOF
 }
 
@@ -550,11 +553,27 @@ download_verified() {
     err "failed to download $_name"
 }
 
+rewrite_github_url() {
+    local _url="$1"
+    local _base
+    case "$_url" in
+        https://github.com/*)
+            if [ -n "${ECC_GITHUB_BASE_URL:-}" ]; then
+                _base="${ECC_GITHUB_BASE_URL%/}"
+                printf '%s\n' "${_base}${_url#https://github.com}"
+                return 0
+            fi
+            ;;
+    esac
+    printf '%s\n' "$_url"
+}
+
 download_by_source() {
     local _sha="$1"
     local _name="$2"
     local _github="$3"
     local _cnb="$4"
+    _github="$(rewrite_github_url "$_github")"
     case "$DOWNLOAD_SOURCE" in
         auto)
             if [ -n "$_cnb" ] && [ "$_cnb" != "-" ]; then
