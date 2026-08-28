@@ -16,8 +16,8 @@ does not own the installer template, generator, tests, or OSS publication.
   install.
 - Prefer GitHub Release assets and fall back to CNB when GitHub is unavailable.
 - Follow XDG directory conventions without modifying shell profiles by default.
-- Make upgrades transactional, support transactional same-version repair, and
-  retain the current and immediately previous ECC versions.
+- Make upgrades between different versions transactional and retain the current
+  and immediately previous ECC versions.
 - Generate one immutable installer per ECC version, with `latest` as a copy of
   the newest successfully published installer.
 
@@ -26,6 +26,8 @@ does not own the installer template, generator, tests, or OSS publication.
 - The first release does not support macOS, Windows, ARM64, musl, or glibc older
   than 2.34.
 - The first release does not provide `ecc self update` or an uninstaller.
+- The first release does not automatically repair a corrupted installation of
+  the same ECC version.
 - The first release does not mirror OSS CAD Suite or the ICS55 PDK to CNB.
 - The installer does not modify the ECC source repository or put installer
   tests in that repository.
@@ -208,29 +210,21 @@ roots are explicitly configured. `ECC_INSTALL_DIR`, `XDG_DATA_HOME`,
 the installer, must be absolute paths without newline or carriage-return
 characters. A relative or malformed configured path fails before filesystem
 mutation. After validated roots are created, the installer resolves their
-physical paths with POSIX `cd -P` and `pwd -P`; locks, receipts, launchers, and
-ownership comparisons use those physical paths so lexical aliases through
-parent-directory symlinks cannot bypass locking.
+physical paths with POSIX `cd -P` and `pwd -P`; locks, the global receipt,
+launchers, and ownership comparisons use those physical paths so lexical aliases
+through parent-directory symlinks cannot bypass locking.
 
 The managed data layout is:
 
 ```text
 <data-root>/
-├── .generations/
-│   ├── ecc-v0.1.0-alpha.10-<generation-id>/
-│   │   ├── ecc
-│   │   ├── _internal/
-│   │   └── .ecos-release-receipt
-│   └── ecc-v0.1.0-alpha.11-<generation-id>/
-│       ├── ecc
-│       ├── _internal/
-│       └── .ecos-release-receipt
+├── ecc-receipt.json
 ├── v0.1.0-alpha.10/
 │   ├── ecc
-│   └── .ecos-release-version
+│   └── _internal/
 ├── v0.1.0-alpha.11/
 │   ├── ecc
-│   └── .ecos-release-version
+│   └── _internal/
 ├── tools/
 │   └── oss-cad-suite/
 │       └── 20260808/
@@ -249,26 +243,34 @@ The cache stores downloads by expected SHA-256 rather than mutable filename:
 
 ## Launcher and Environment Isolation
 
-Each `.generations` child is an immutable physical installation. Its
-`<generation-id>` is a unique `mktemp`-generated identifier and is not a public
-version or API. A validated generation is never modified after promotion.
+`<data-root>/ecc-receipt.json` is one global, static ownership receipt. Its
+complete contents are one JSON object followed by a newline:
 
-`<data-root>/<version>/ecc` is a small generated POSIX fixed-version launcher.
-It points to one exact generation and allows users to keep invoking an installed
-older version through the stable `<data-root>/<version>/ecc` path. The adjacent
-`.ecos-release-version` marker records only static ownership and the logical
-version; the atomically replaceable launcher contains the generation assignment.
+```json
+{"format":1,"owner":"ecos-release"}
+```
 
-`<bin-dir>/ecc` is the current-version launcher. It contains installer-owned,
-machine-readable version and generation assignments, optionally reads the
-installer-owned `<data-root>/env` file, and executes that generation's real
-binary with all arguments. It is the only current-version pointer; the
-fixed-version launchers are aliases, not current-state records, and no parallel
-current-version state file is maintained.
+The receipt does not list installed versions, artifact digests, the current
+version, or the previous version, and it is not updated on each install. It
+reserves exact `v<semver>` directory names and the `tools`, `pdks`, and `env`
+namespaces below the data root for this installer.
 
-Both current-version and fixed-version launchers read the same optional managed
-env file before executing ECC, so direct invocation of an older installed
-version continues to use the currently selected shared toolchain.
+If the data root does not exist, the installer creates it and the ownership
+receipt. An existing empty data root may be claimed by creating the receipt. An
+existing non-empty data root without the exact valid receipt is not adopted or
+modified. Receipt initialization uses a temporary file in the data root's
+parent and an atomic no-clobber link into the data root. If another invocation
+publishes the target first, the loser validates it rather than overwriting it.
+The installer compares the complete bytes and does not need a JSON parser. After
+initialization, every install validates the exact receipt before creating the
+data-root lock or changing managed state.
+
+`<bin-dir>/ecc` is a small generated POSIX launcher rather than a copy of the
+PyInstaller executable. It contains installer-owned, machine-readable version
+and data-root assignments, optionally reads the installer-owned
+`<data-root>/env` file, and executes `<data-root>/<version>/ecc` with all
+arguments. It is the only current-version pointer; the global receipt does not
+duplicate current state.
 
 The installer parses owned launcher assignments as data and never sources or
 executes an existing launcher while discovering prior state.
@@ -292,12 +294,11 @@ run:
 yosys --version
 ```
 
-All launchers and env files use safely quoted absolute paths and are installed
-through temporary files followed by same-directory `mv`. Before any install,
-an existing `<bin-dir>/ecc`, fixed-version directory, or `<data-root>/env` that
-does not have the expected installer marker and valid structure is treated as
-an ownership collision and is not overwritten. The installer has no implicit
-force-overwrite mode.
+The launcher and env file use safely quoted absolute paths and are installed
+through temporary files followed by same-directory `mv`. Before any install, an
+existing `<bin-dir>/ecc` that does not have the expected installer marker and
+valid structure is treated as an ownership collision and is not overwritten.
+The installer has no implicit force-overwrite mode.
 
 ## Shell Profile Policy
 
@@ -409,52 +410,51 @@ data and binary roots overlap across invocations.
 ECC installation follows these phases:
 
 1. Validate options, commands, platform, configured paths, ownership collisions,
-   and writable roots.
+   and writable roots, then initialize or validate the fixed global receipt.
 2. Reuse a cache entry only after SHA-256 verification.
 3. Download to a `.part` file and atomically promote it into the cache.
 4. Acquire the data-root lock and then the binary-directory lock.
-5. Re-read the launcher, receipts, and ownership markers while holding both
-   locks; decisions made before locking are not trusted for mutation.
-6. Apply the archive safety policy and extract into a unique temporary
-   generation directory under `<data-root>/.generations`.
+5. Re-read the launcher and global receipt while holding both locks;
+   decisions made before locking are not trusted for mutation.
+6. Apply the archive safety policy and extract into a unique temporary directory
+   under the ECC data root.
 7. Verify the expected `ecc` and `_internal` layout.
 8. Run `ecc --version`, `ecc version --json`, and verify that
    `_internal/torch/bin/torch_shm_manager` is executable.
-9. Write the generation receipt and atomically rename staging to a new,
-   previously nonexistent generation directory.
-10. If the fixed-version directory does not exist, atomically promote a staged
-    directory containing its static ownership marker and launcher. If it already
-    exists and validates as owned, atomically replace only its `ecc` launcher so
-    the stable fixed-version path points to the validated generation.
-11. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
-    current-version commit point.
+9. If `<data-root>/<version>` does not exist, atomically rename staging to that
+   previously nonexistent version directory.
+10. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
+    commit point.
+11. When switching versions, remove older managed ECC version directories while
+    retaining the new and prior versions.
 
-An existing generation is reused only when its receipt matches the expected
-artifact digest and its runtime smoke tests still pass. Otherwise a new
-generation is installed; a committed generation is never repaired in place.
-This permits transactional same-version repair without attempting to atomically
-replace a non-empty directory.
+An existing same-version directory is reused only when its expected layout and
+runtime smoke tests pass. If it is incomplete or fails a smoke test, the
+installer stops without moving, deleting, or overwriting it and tells the user
+to move the directory aside before reinstalling. Same-version automatic repair
+is intentionally excluded because a non-empty active directory cannot be
+atomically replaced.
 
-Before switching the current launcher, the installer reads the prior version and
-generation only from an existing launcher whose owned marker and structure
-validate. After a successful switch it retains the new current logical version
-and that prior logical version. It removes older fixed-version directories and
-unreferenced generations only when their ownership markers and receipts are
-valid and mutually consistent. A successful same-version repair may remove the
-superseded generation after the fixed-version and current-version launchers both
-point to the new generation. If no valid owned current launcher exists, cleanup
-is skipped. Unknown directories and files are never deleted.
+Before switching the launcher to a different version, the installer reads the
+prior version only from an existing launcher whose owned marker and structure
+validate. After a successful switch it retains the new current version and that
+prior version. It removes other top-level directories whose names are exact ECC
+version tags only because the valid global receipt reserves that namespace for
+the installer. Cleanup does not run for a same-version reinstall or when no valid
+owned prior launcher exists. `tools`, `pdks`, unknown names, and unknown files
+are never removed by ECC version cleanup.
+
+Cleanup runs after the commit point. A cleanup failure leaves the new launcher
+active, preserves any version it could not safely remove, and is reported as a
+warning; a later different-version install retries cleanup.
 
 Installing a fixed older version is supported by running that version's
 installer. Users may also execute an installed older version directly at
 `<data-root>/<version>/ecc`.
 
-Any failure before current-launcher replacement leaves the existing current ECC
-launcher and generation unchanged. A validated fixed-version launcher may have
-been created or repaired before that point, but it never points to an invalid
-generation. A trap removes temporary files and releases owned locks without
-deleting verified cache entries, committed generations, or prior installed
-versions.
+Any failure before launcher replacement leaves the existing current ECC
+unchanged. A trap removes temporary files and releases owned locks without
+deleting verified cache entries or prior installed versions.
 
 ## Optional Toolchain Installation
 
@@ -469,10 +469,10 @@ toolchain.
 Each component uses its own staging directory, digest verification, archive
 safety checks, and final validation. Existing complete versions are shared
 across ECC versions and reused. Toolchain state mutation occurs while holding
-the same data-root lock used for ECC installation. A component version is reused
-or removed only when its installer receipt matches its expected version and
-digests. An existing unowned component-version path is an ownership collision,
-not an adoption candidate.
+the same data-root lock used for ECC installation. Because the global receipt
+reserves the toolchain namespaces, an existing component version is reused only
+when all component validations pass. An invalid same-version component fails
+closed and is not replaced in place.
 
 OSS CAD Suite validation requires at least:
 
@@ -537,13 +537,15 @@ a local HTTP server. They cover:
 - Default no-profile behavior and explicit, idempotent one-profile mutation.
 - Successful install and launcher execution.
 - Failed upgrade preserving the existing launcher and current version.
-- Transactional repair of a corrupted same-version generation.
+- A corrupted same-version directory failing without changing the launcher or
+  installed files.
 - Three successful versions retaining only the newest and its predecessor.
-- Idempotent reinstall of a valid same-version generation.
+- Idempotent reinstall of a valid same-version directory without deleting the
+  retained previous version.
 - A concurrent installer encountering a live lock failing without mutating or
-  deleting the selected generation, and stale-lock recovery succeeding safely.
-- Refusal to delete directories without installer receipts.
-- Refusal to overwrite an unowned binary, fixed-version directory, or env file.
+  deleting the selected version, and stale-lock recovery succeeding safely.
+- Creation and validation of the one global ownership receipt.
+- Refusal to adopt a non-empty unowned data root or overwrite an unowned binary.
 - Shadowed `ecc` detection and `ZDOTDIR` / `XDG_CONFIG_HOME` profile selection.
 - Rejection of traversal paths, escaping links, and special archive members for
   every supported archive type.
@@ -560,7 +562,7 @@ Slang, Liberty, and LEF validations defined above.
 ## Publication Workflow
 
 The first workflow is manually triggered with an exact ECC tag. Automation from
-ECC release events may be added later without changing generation semantics.
+ECC release events may be added later without changing publication semantics.
 
 The publication workflow uses one repository-wide installer-publication
 concurrency group with `cancel-in-progress: false`. A second run waits instead
@@ -622,8 +624,8 @@ version remains supported at its versioned URL but never downgrades `latest`.
 - Every installed archive is verified against release-derived SHA-256 metadata.
 - Failed downloads, validation, extraction, or smoke tests do not replace the
   existing working ECC launcher.
-- A corrupted same-version install is repaired through a new immutable
-  generation without modifying the active generation in place.
+- A corrupted same-version install fails without changing the active launcher or
+  installed directory.
 - Concurrent installer invocations cannot overlap installed-state mutation.
 - The current and immediately previous ECC versions remain directly executable;
   older installer-owned versions are removed.
