@@ -881,6 +881,7 @@ extract_pdk_supplementals() {
 @PDK_ASSET_TABLE@
 PDK_ASSETS
 }
+
 install_pdk() {
     local _archive="$1"
     local _dest="${DATA_ROOT}/pdks/${PDK_NAME}/${PDK_VERSION}"
