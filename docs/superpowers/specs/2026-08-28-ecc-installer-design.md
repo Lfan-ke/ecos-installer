@@ -15,9 +15,9 @@ does not own the installer template, generator, tests, or OSS publication.
 - Support a lightweight default install and an optional complete toolchain
   install.
 - Prefer GitHub Release assets and fall back to CNB when GitHub is unavailable.
-- Follow XDG directory conventions without modifying shell profiles by default.
-- Make upgrades between different versions transactional and retain the current
-  and immediately previous ECC versions.
+- Follow XDG directory conventions without modifying shell profiles.
+- Make upgrades between different versions transactional without deleting
+  previously installed versions.
 - Generate one immutable installer per ECC version, with `latest` as a copy of
   the newest successfully published installer.
 
@@ -28,6 +28,7 @@ does not own the installer template, generator, tests, or OSS publication.
 - The first release does not provide `ecc self update` or an uninstaller.
 - The first release does not automatically repair a corrupted installation of
   the same ECC version.
+- The first release does not automatically remove installed ECC versions.
 - The first release does not mirror OSS CAD Suite or the ICS55 PDK to CNB.
 - The installer does not modify the ECC source repository or put installer
   tests in that repository.
@@ -132,7 +133,6 @@ Supported options:
 -v, --verbose
 -q, --quiet
 --with-toolchain
---modify-path
 --download-source auto|github|cnb
 ```
 
@@ -140,7 +140,6 @@ Supported environment variables:
 
 ```text
 ECC_WITH_TOOLCHAIN=1
-ECC_MODIFY_PATH=1
 ECC_DOWNLOAD_SOURCE=auto|github|cnb
 ECC_INSTALL_DIR=/absolute/path/to/ecc-data
 ```
@@ -201,24 +200,25 @@ Binary directory:
 
 Cache root:
   ${XDG_CACHE_HOME:-$HOME/.cache}/ecc
+
+Configuration root:
+  ${XDG_CONFIG_HOME:-$HOME/.config}/ecc
 ```
 
 `XDG_BIN_HOME` is treated as a commonly used extension; the default remains
 `$HOME/.local/bin`. An unset or empty `HOME` is an error unless all required
 roots are explicitly configured. `ECC_INSTALL_DIR`, `XDG_DATA_HOME`,
-`XDG_BIN_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, and `ZDOTDIR`, when used by
-the installer, must be absolute paths without newline or carriage-return
-characters. A relative or malformed configured path fails before filesystem
-mutation. After validated roots are created, the installer resolves their
-physical paths with POSIX `cd -P` and `pwd -P`; locks, the global receipt,
-launchers, and ownership comparisons use those physical paths so lexical aliases
-through parent-directory symlinks cannot bypass locking.
+`XDG_BIN_HOME`, `XDG_CACHE_HOME`, and `XDG_CONFIG_HOME`, when used by the
+installer, must be absolute paths without control characters. A relative or
+malformed configured path fails before filesystem mutation. After validated
+roots are created, the installer resolves their physical paths with POSIX
+`cd -P` and `pwd -P`; the lock, launcher, and generated receipt use those
+physical paths.
 
 The managed data layout is:
 
 ```text
 <data-root>/
-├── ecc-receipt.json
 ├── v0.1.0-alpha.10/
 │   ├── ecc
 │   └── _internal/
@@ -234,6 +234,12 @@ The managed data layout is:
 └── env
 ```
 
+The installer writes global metadata separately:
+
+```text
+<config-root>/ecc-receipt.json
+```
+
 The cache stores downloads by expected SHA-256 rather than mutable filename:
 
 ```text
@@ -243,34 +249,34 @@ The cache stores downloads by expected SHA-256 rather than mutable filename:
 
 ## Launcher and Environment Isolation
 
-`<data-root>/ecc-receipt.json` is one global, static ownership receipt. Its
-complete contents are one JSON object followed by a newline:
+`<config-root>/ecc-receipt.json` is global installation metadata modeled after
+uv's receipt. The generated file is compact JSON equivalent to:
 
 ```json
-{"format":1,"owner":"ecos-release"}
+{
+  "binaries": ["ecc"],
+  "data_root": "/home/user/.local/share/ecc",
+  "install_prefix": "/home/user/.local/bin",
+  "provider": {"format": 1, "name": "ecos-release"},
+  "version": "0.1.0-alpha.11"
+}
 ```
 
-The receipt does not list installed versions, artifact digests, the current
-version, or the previous version, and it is not updated on each install. It
-reserves exact `v<semver>` directory names and the `tools`, `pdks`, and `env`
-namespaces below the data root for this installer.
-
-If the data root does not exist, the installer creates it and the ownership
-receipt. An existing empty data root may be claimed by creating the receipt. An
-existing non-empty data root without the exact valid receipt is not adopted or
-modified. Receipt initialization uses a temporary file in the data root's
-parent and an atomic no-clobber link into the data root. If another invocation
-publishes the target first, the loser validates it rather than overwriting it.
-The installer compares the complete bytes and does not need a JSON parser. After
-initialization, every install validates the exact receipt before creating the
-data-root lock or changing managed state.
+The installer writes the receipt through a temporary file and same-directory
+`mv` after the current launcher has been replaced. It safely JSON-escapes path
+values. Receipt failure is a warning and does not turn an otherwise successful
+installation into a failure. The installer never reads the receipt and does not
+use it for ownership, reuse, cleanup, or current-version selection. A future
+updater or uninstaller may consume it; `<bin-dir>/ecc` remains the authoritative
+current-version pointer. A missing, stale, or malformed existing receipt never
+blocks installation and is replaced after the launcher commit.
 
 `<bin-dir>/ecc` is a small generated POSIX launcher rather than a copy of the
 PyInstaller executable. It contains installer-owned, machine-readable version
 and data-root assignments, optionally reads the installer-owned
 `<data-root>/env` file, and executes `<data-root>/<version>/ecc` with all
-arguments. It is the only current-version pointer; the global receipt does not
-duplicate current state.
+arguments. It is the only authoritative current-version pointer; the global
+receipt is only a metadata snapshot.
 
 The installer parses owned launcher assignments as data and never sources or
 executes an existing launcher while discovering prior state.
@@ -300,25 +306,11 @@ existing `<bin-dir>/ecc` that does not have the expected installer marker and
 valid structure is treated as an ownership collision and is not overwritten.
 The installer has no implicit force-overwrite mode.
 
-## Shell Profile Policy
+## PATH Policy
 
-The default installation never modifies a shell profile. If `<bin-dir>` is not
-already in `PATH`, the installer prints a command for the current shell.
-
-Profile mutation occurs only with `--modify-path` or `ECC_MODIFY_PATH=1`. The
-installer uses the basename of `SHELL` to select one file:
-
-```text
-sh:    $HOME/.profile
-bash:  $HOME/.bashrc
-zsh:   ${ZDOTDIR:-$HOME}/.zshrc
-fish:  ${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/ecc.env.fish
-```
-
-Known Bourne-style profiles receive one marked, idempotent block. Fish receives
-equivalent fish syntax. An unknown shell is not modified; the installer prints
-manual instructions. Failure to update a requested profile is reported after a
-successful install and returns a nonzero status without rolling back ECC.
+The installer never modifies shell profiles. If `<bin-dir>` is not already in
+`PATH`, it prints the appropriate command for POSIX shells, or fish syntax when
+the basename of `SHELL` is `fish`.
 
 After installation, the installer evaluates `command -v ecc`. If it does not
 resolve to `<bin-dir>/ecc`, it reports the command that shadows the installed
@@ -338,14 +330,9 @@ fallback:
 Each transfer uses `curl -fL` with a 10-second connection timeout, two retries
 after the initial attempt, a two-second retry delay, a 60-second retry budget,
 and low-speed failure when the transfer remains below 1024 bytes per second for
-30 seconds. Generation or preflight fails if the available `curl` cannot support
-the required options. These values are part of the first installer behavior,
-not mutable environment configuration.
-
-An optional short request to the exact asset URL may be used to avoid selecting
-an obviously unavailable source, but a successful probe never replaces real
-download error handling. Testing only `github.com` is insufficient because the
-redirected release asset host may be blocked.
+30 seconds. Installation fails before downloading if the available `curl` cannot
+support the required options. These values are part of the first installer
+behavior, not mutable environment configuration.
 
 Downloads use a unique source-specific partial file created with `mktemp` below
 the cache download directory. A failed source's partial bytes are not resumed
@@ -391,31 +378,24 @@ it must fail closed when the installed tar cannot provide them.
 ## Installation Locking
 
 Downloads into unique cache partial files may run without an installation lock.
-Before reading or mutating installed state, every invocation acquires two
-installer-owned directory locks in a fixed order:
-
-1. `<data-root>/.ecos-release-install-lock`
-2. `<bin-dir>/.ecc-install-lock`
-
-The locks use atomic `mkdir`, record PID and host information, and are released
-by the normal exit and signal trap. A contender never mutates installed state
-while either lock is held. If the recorded host is local and the PID is no
-longer alive, a contender may atomically quarantine the stale lock and retry;
-an unverifiable or live owner causes a clear nonzero failure. Acquiring the data
-lock before the binary lock for every invocation prevents deadlock when custom
-data and binary roots overlap across invocations.
+Before mutating installed state, an invocation acquires one
+`<data-root>/.ecc-install-lock` directory using atomic `mkdir`. The normal exit
+and signal trap removes only a lock acquired by the current process. If the lock
+already exists, the installer fails with its path and tells the user to confirm
+that no installer is running before removing it manually. The installer does not
+interpret PID files or recover stale locks automatically.
 
 ## Transactional ECC Installation
 
 ECC installation follows these phases:
 
 1. Validate options, commands, platform, configured paths, ownership collisions,
-   and writable roots, then initialize or validate the fixed global receipt.
+   and writable roots.
 2. Reuse a cache entry only after SHA-256 verification.
 3. Download to a `.part` file and atomically promote it into the cache.
-4. Acquire the data-root lock and then the binary-directory lock.
-5. Re-read the launcher and global receipt while holding both locks;
-   decisions made before locking are not trusted for mutation.
+4. Acquire the data-root lock.
+5. Re-read the launcher and target paths while holding the lock; decisions made
+   before locking are not trusted for mutation.
 6. Apply the archive safety policy and extract into a unique temporary directory
    under the ECC data root.
 7. Verify the expected `ecc` and `_internal` layout.
@@ -425,8 +405,7 @@ ECC installation follows these phases:
    previously nonexistent version directory.
 10. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
     commit point.
-11. When switching versions, remove older managed ECC version directories while
-    retaining the new and prior versions.
+11. Atomically write the global receipt. Failure here produces a warning only.
 
 An existing same-version directory is reused only when its expected layout and
 runtime smoke tests pass. If it is incomplete or fails a smoke test, the
@@ -435,25 +414,16 @@ to move the directory aside before reinstalling. Same-version automatic repair
 is intentionally excluded because a non-empty active directory cannot be
 atomically replaced.
 
-Before switching the launcher to a different version, the installer reads the
-prior version only from an existing launcher whose owned marker and structure
-validate. After a successful switch it retains the new current version and that
-prior version. It removes other top-level directories whose names are exact ECC
-version tags only because the valid global receipt reserves that namespace for
-the installer. Cleanup does not run for a same-version reinstall or when no valid
-owned prior launcher exists. `tools`, `pdks`, unknown names, and unknown files
-are never removed by ECC version cleanup.
-
-Cleanup runs after the commit point. A cleanup failure leaves the new launcher
-active, preserves any version it could not safely remove, and is reported as a
-warning; a later different-version install retries cleanup.
+Installing a version never removes another version directory. Old versions
+remain directly executable until the user removes them or a future uninstaller
+manages them.
 
 Installing a fixed older version is supported by running that version's
 installer. Users may also execute an installed older version directly at
 `<data-root>/<version>/ecc`.
 
 Any failure before launcher replacement leaves the existing current ECC
-unchanged. A trap removes temporary files and releases owned locks without
+unchanged. A trap removes temporary files and releases the owned lock without
 deleting verified cache entries or prior installed versions.
 
 ## Optional Toolchain Installation
@@ -469,10 +439,10 @@ toolchain.
 Each component uses its own staging directory, digest verification, archive
 safety checks, and final validation. Existing complete versions are shared
 across ECC versions and reused. Toolchain state mutation occurs while holding
-the same data-root lock used for ECC installation. Because the global receipt
-reserves the toolchain namespaces, an existing component version is reused only
-when all component validations pass. An invalid same-version component fails
-closed and is not replaced in place.
+the same data-root lock used for ECC installation. An existing component version
+is reused only when all component validations pass. An invalid same-version
+component fails closed and is not replaced in place. Unknown paths below the
+data root are not adopted, overwritten, or deleted.
 
 OSS CAD Suite validation requires at least:
 
@@ -534,30 +504,33 @@ a local HTTP server. They cover:
 - Both sources unavailable.
 - Checksum mismatch.
 - Unsupported OS, CPU, bitness, libc, and glibc version.
-- Default no-profile behavior and explicit, idempotent one-profile mutation.
+- PATH guidance without shell-profile mutation.
 - Successful install and launcher execution.
 - Failed upgrade preserving the existing launcher and current version.
 - A corrupted same-version directory failing without changing the launcher or
   installed files.
-- Three successful versions retaining only the newest and its predecessor.
-- Idempotent reinstall of a valid same-version directory without deleting the
-  retained previous version.
+- Three successful versions remaining installed while the launcher selects the
+  newest one.
+- Idempotent reinstall of a valid same-version directory without deleting other
+  versions.
 - A concurrent installer encountering a live lock failing without mutating or
-  deleting the selected version, and stale-lock recovery succeeding safely.
-- Creation and validation of the one global ownership receipt.
-- Refusal to adopt a non-empty unowned data root or overwrite an unowned binary.
-- Shadowed `ecc` detection and `ZDOTDIR` / `XDG_CONFIG_HOME` profile selection.
+  deleting installed state, and manual lock removal allowing a later retry.
+- Global receipt creation after launcher commit and receipt-write failure being
+  non-fatal.
+- A missing, stale, or malformed prior receipt not affecting installation.
+- Refusal to overwrite an unowned binary or invalid same-version target.
+- Shadowed `ecc` detection and `XDG_CONFIG_HOME` receipt placement.
 - Rejection of traversal paths, escaping links, and special archive members for
   every supported archive type.
 - Toolchain failure preserving a working ECC and prior env file.
 - Real Yosys version and Slang frontend probes in the candidate environment.
 - Validation of every Liberty member in all three PDK Liberty archives.
 
-The publication workflow additionally performs two real-artifact installations
-into temporary XDG directories before OSS publication: an ECC-only install that
-executes the public CLI smoke commands, and a `--with-toolchain` install that
-downloads every referenced OSS CAD Suite and PDK asset and executes the Yosys,
-Slang, Liberty, and LEF validations defined above.
+The publication workflow additionally performs one real-artifact
+`--with-toolchain` installation into temporary XDG directories before OSS
+publication. It executes the public ECC CLI smoke commands, downloads every
+referenced OSS CAD Suite and PDK asset, and executes the Yosys, Slang, Liberty,
+and LEF validations defined above.
 
 ## Publication Workflow
 
@@ -626,9 +599,11 @@ version remains supported at its versioned URL but never downgrades `latest`.
   existing working ECC launcher.
 - A corrupted same-version install fails without changing the active launcher or
   installed directory.
-- Concurrent installer invocations cannot overlap installed-state mutation.
-- The current and immediately previous ECC versions remain directly executable;
-  older installer-owned versions are removed.
+- Concurrent installer invocations using the same data root cannot overlap
+  installed-state mutation.
+- Installing a new ECC version does not delete any previously installed version.
+- A successful install writes a non-authoritative global receipt after switching
+  the launcher; receipt failure does not break the installed ECC.
 - `--with-toolchain` installs shared tools and PDK data below the ECC data root
   and does not globally shadow Yosys.
 - PDK validation checks every Liberty member supplied by all three Liberty
