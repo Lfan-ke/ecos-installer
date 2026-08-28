@@ -49,6 +49,7 @@ The `ecos-release` repository owns:
 
 - The installer template and generator.
 - Installer metadata for ECC, OSS CAD Suite, and the ICS55 PDK.
+- Structured archive validation for every referenced release asset.
 - Installer syntax and behavior tests.
 - GitHub and CNB availability checks.
 - Versioned installer and `latest` publication to OSS.
@@ -95,7 +96,8 @@ The generated script is self-contained. It does not fetch a manifest at install
 time. Repeated generation from identical input must produce identical bytes.
 ECC versions must be valid Semantic Versioning 2.0.0 values, and the exact tag
 must be `v<version>`. The same SemVer ordering is used when deciding whether a
-publication may advance `latest`.
+publication may advance `latest`. Generation is allowed only after every input
+archive's exact bytes pass structured member validation and digest verification.
 
 The GitHub ECC metadata comes from the exact tag endpoint:
 
@@ -212,7 +214,7 @@ roots are explicitly configured. `ECC_INSTALL_DIR`, `XDG_DATA_HOME`,
 installer, must be absolute paths without control characters. A relative or
 malformed configured path fails before filesystem mutation. After validated
 roots are created, the installer resolves their physical paths with POSIX
-`cd -P` and `pwd -P`; the lock, launcher, and generated receipt use those
+`cd -P` and `pwd -P`; the lock, wrapper, and generated receipt use those
 physical paths.
 
 The managed data layout is:
@@ -231,7 +233,6 @@ The managed data layout is:
 ├── pdks/
 │   └── icsprout55/
 │       └── v1.10.102/
-└── env
 ```
 
 The installer writes global metadata separately:
@@ -247,7 +248,7 @@ The cache stores downloads by expected SHA-256 rather than mutable filename:
 <cache-root>/downloads/<sha256>.tar.bz2
 ```
 
-## Launcher and Environment Isolation
+## Run Wrapper and Environment Isolation
 
 `<config-root>/ecc-receipt.json` is global installation metadata modeled after
 uv's receipt. The generated file is compact JSON equivalent to:
@@ -263,48 +264,42 @@ uv's receipt. The generated file is compact JSON equivalent to:
 ```
 
 The installer writes the receipt through a temporary file and same-directory
-`mv` after the current launcher has been replaced. It safely JSON-escapes path
+`mv` after the current wrapper has been replaced. It safely JSON-escapes path
 values. Receipt failure is a warning and does not turn an otherwise successful
 installation into a failure. The installer never reads the receipt and does not
 use it for ownership, reuse, cleanup, or current-version selection. A future
 updater or uninstaller may consume it; `<bin-dir>/ecc` remains the authoritative
 current-version pointer. A missing, stale, or malformed existing receipt never
-blocks installation and is replaced after the launcher commit.
+blocks installation and is replaced after the wrapper commit.
 
-`<bin-dir>/ecc` is a small generated POSIX launcher rather than a copy of the
-PyInstaller executable. It contains installer-owned, machine-readable version
-and data-root assignments, optionally reads the installer-owned
-`<data-root>/env` file, and executes `<data-root>/<version>/ecc` with all
+`<bin-dir>/ecc` is a generated POSIX run-wrapper rather than a copy of the
+PyInstaller executable. Its first two lines are the exact shebang `#!/bin/sh` and
+ownership marker `# ecos-release-wrapper-v1`. It contains safely shell-quoted
+data-root and version values, then executes `<data-root>/<version>/ecc` with all
 arguments. It is the only authoritative current-version pointer; the global
 receipt is only a metadata snapshot.
 
-The installer parses owned launcher assignments as data and never sources or
-executes an existing launcher while discovering prior state.
-
-When the optional toolchain is complete, `env` exports:
+An ECC-only wrapper exports no toolchain variables. When a complete managed
+toolchain is selected, the wrapper exports only:
 
 ```text
-CHIPCOMPILER_OSS_CAD_DIR
-YOSYS_PLUGINPATH
-CHIPCOMPILER_ICS55_PDK_ROOT
-PATH=<managed OSS CAD Suite bin>:$PATH
+CHIPCOMPILER_OSS_CAD_DIR=<managed OSS CAD Suite root>
+CHIPCOMPILER_ICS55_PDK_ROOT=<managed ICS55 PDK root>
 ```
 
-These values affect only an ECC process launched through the wrapper. The
-installer does not create `<bin-dir>/yosys` and does not globally prepend the
-managed Yosys directory. A user who intentionally wants direct tool access may
-run:
+Those exports affect only the wrapper process, the real ECC process that
+replaces it through `exec`, and ECC child processes. They do not modify the
+calling shell or any system-wide environment. The wrapper does not modify
+`PATH` and does not export `YOSYS_PLUGINPATH` or `YOSYS_DATDIR`; ECC resolves the
+managed Yosys executable from `CHIPCOMPILER_OSS_CAD_DIR` and builds the
+Yosys-specific subprocess environment itself.
 
-```sh
-. <data-root>/env
-yosys --version
-```
-
-The launcher and env file use safely quoted absolute paths and are installed
-through temporary files followed by same-directory `mv`. Before any install, an
-existing `<bin-dir>/ecc` that does not have the expected installer marker and
-valid structure is treated as an ownership collision and is not overwritten.
-The installer has no implicit force-overwrite mode.
+There is no separate runtime env file. The installer never sources or executes
+an existing wrapper while discovering prior state. It accepts an existing
+`<bin-dir>/ecc` as owned only when it is a regular file with the exact shebang
+and ownership marker; otherwise the path is an ownership collision. The
+candidate wrapper passes `sh -n` and is installed through a temporary file and
+same-directory `mv`. The installer has no implicit force-overwrite mode.
 
 ## PATH Policy
 
@@ -314,7 +309,7 @@ the basename of `SHELL` is `fish`.
 
 After installation, the installer evaluates `command -v ecc`. If it does not
 resolve to `<bin-dir>/ecc`, it reports the command that shadows the installed
-launcher even when `<bin-dir>` appears elsewhere in `PATH`.
+wrapper even when `<bin-dir>` appears elsewhere in `PATH`.
 
 ## Source Selection and Downloading
 
@@ -355,25 +350,33 @@ changing the command interface.
 
 ## Archive Safety Policy
 
-Every ECC, OSS CAD Suite, PDK base, and PDK supplemental archive is subject to
-the same extraction policy. Before extraction, the installer obtains the full
-member inventory and rejects:
+Before generating a public installer, the publication workflow downloads the
+exact ECC, OSS CAD Suite, PDK base, and PDK supplemental archive bytes. A
+publication validator uses Python's structured `tarfile` member metadata, not
+formatted `tar -t` output, to obtain the complete inventory and reject:
 
 - Absolute member paths, empty member paths, or a `..` path component.
-- Member paths or link targets containing newline, carriage-return, or other
-  control characters that the inventory parser cannot represent unambiguously.
+- Member paths or link targets containing control characters.
 - Symbolic-link or hard-link targets that are absolute or resolve outside the
   staging root.
 - Device nodes, FIFOs, sockets, and any entry type other than a regular file,
   directory, symbolic link, or hard link.
 
-Extraction runs only into a newly created staging directory, never through the
-PDK repository's `make unzip` target. It disables owner and permission
-restoration and must not follow a pre-existing directory symlink. After
-extraction, the installer walks the staging tree, rejects special files, and
-verifies that every link resolves within the staging root. The implementation
-may rely on explicitly preflighted GNU tar capabilities for these guarantees;
-it must fail closed when the installed tar cannot provide them.
+Only after this structural validation succeeds may the workflow bind the
+archive's SHA-256 digest into a generated installer. CNB ECC bytes must match the
+same validated digest. Structural validation therefore applies to the exact
+bytes accepted later by the runtime installer rather than to a mutable filename
+or URL.
+
+At runtime, the installer does not reimplement a structured archive parser in
+POSIX shell. It verifies the downloaded bytes against the embedded digest, then
+extracts only into a newly created staging directory using preflighted GNU tar
+with owner and permission restoration disabled. It never invokes the PDK
+repository's `make unzip` target. A nonzero extraction status fails the install.
+After extraction, it verifies the expected component layout and rejects
+unexpected filesystem object types before any runtime smoke test or final
+promotion. The publication validator remains responsible for complete member
+path and link-target analysis.
 
 ## Installation Locking
 
@@ -394,7 +397,7 @@ ECC installation follows these phases:
 2. Reuse a cache entry only after SHA-256 verification.
 3. Download to a `.part` file and atomically promote it into the cache.
 4. Acquire the data-root lock.
-5. Re-read the launcher and target paths while holding the lock; decisions made
+5. Re-read the wrapper and target paths while holding the lock; decisions made
    before locking are not trusted for mutation.
 6. Apply the archive safety policy and extract into a unique temporary directory
    under the ECC data root.
@@ -403,9 +406,13 @@ ECC installation follows these phases:
    `_internal/torch/bin/torch_shm_manager` is executable.
 9. If `<data-root>/<version>` does not exist, atomically rename staging to that
    previously nonexistent version directory.
-10. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
+10. Install and validate the requested optional toolchain while the existing
+    wrapper remains unchanged.
+11. Generate an ECC-only wrapper, or a toolchain wrapper when the requested or
+    already installed expected toolchain versions validate.
+12. Atomically replace `<bin-dir>/ecc`. This replacement is the transaction's
     commit point.
-11. Atomically write the global receipt. Failure here produces a warning only.
+13. Atomically write the global receipt. Failure here produces a warning only.
 
 An existing same-version directory is reused only when its expected layout and
 runtime smoke tests pass. If it is incomplete or fails a smoke test, the
@@ -422,19 +429,23 @@ Installing a fixed older version is supported by running that version's
 installer. Users may also execute an installed older version directly at
 `<data-root>/<version>/ecc`.
 
-Any failure before launcher replacement leaves the existing current ECC
+Except for the explicitly handled optional-toolchain degradation described
+below, any failure before wrapper replacement leaves the existing current ECC
 unchanged. A trap removes temporary files and releases the owned lock without
 deleting verified cache entries or prior installed versions.
 
 ## Optional Toolchain Installation
 
 `--with-toolchain` installs OSS CAD Suite and the ICS55 PDK after the ECC bundle
-has passed its own installation transaction. A toolchain failure does not roll
-back a successfully installed ECC CLI.
+has passed its validation but before the wrapper commit. A toolchain failure does
+not discard a successfully staged ECC CLI: the installer commits an ECC-only
+wrapper, returns nonzero, and clearly reports that ECC succeeded while the
+optional toolchain failed.
 
-An ECC-only install leaves an existing valid `<data-root>/env` and toolchain
-untouched, so an ECC upgrade continues to use the previously installed shared
-toolchain.
+An ECC-only install leaves existing toolchain directories untouched. If the
+expected OSS CAD Suite and PDK versions already pass the validations below, the
+new wrapper continues to export their roots; otherwise it exports no toolchain
+variables and reports that ECC was installed without the managed toolchain.
 
 Each component uses its own staging directory, digest verification, archive
 safety checks, and final validation. Existing complete versions are shared
@@ -449,7 +460,7 @@ OSS CAD Suite validation requires at least:
 ```text
 bin/yosys is executable
 share/yosys/plugins exists
-yosys --version succeeds in the candidate launcher environment
+yosys --version succeeds in the candidate wrapper environment
 the ECC-compatible builtin `read_slang` or `plugin -i slang` probe succeeds
 ```
 
@@ -462,34 +473,35 @@ ics55_LLSC_H7CL_liberty.tar.bz2
 ics55_LLSC_H7CR_liberty.tar.bz2
 ```
 
-For each verified Liberty archive, the installer obtains the complete `.lib`
-member list before extraction. It rejects an archive with no `.lib` members.
-The installer extracts all seven supplemental archives directly into their
-metadata-defined destinations instead of invoking the PDK Makefile. After this
-deterministic unpack step, every listed Liberty file must exist and be non-empty.
-This validates the PDK release contents and does not depend on ECC's
-`sta_ecc.json` flow configuration.
+For each verified Liberty archive, the publication validator obtains the
+complete `.lib` member list and rejects an archive with no `.lib` members. The
+generated installer embeds the normalized destination of every listed Liberty
+file. At runtime it extracts all seven supplemental archives directly into their
+metadata-defined destinations instead of invoking the PDK Makefile, then
+requires every embedded Liberty path to exist and be non-empty. This validates
+the PDK release contents and does not depend on ECC's `sta_ecc.json` flow
+configuration.
 
 The installer also validates the tech LEF and standard-cell LEFs required by
 ECC's PDK contract. Tool runtime probes run with `LD_LIBRARY_PATH` and
 `LD_PRELOAD` removed, matching ECC's managed Yosys subprocess behavior. Only
-after both OSS CAD Suite and PDK validation pass does the installer atomically
-update `<data-root>/env`. If either component fails, an existing env file and
-existing complete toolchain remain unchanged.
-
-The final command exits nonzero and clearly reports that ECC succeeded but the
-optional toolchain failed.
+after both OSS CAD Suite and PDK validation pass may their roots be embedded in
+the candidate wrapper. If either component fails, existing complete toolchain
+directories remain unchanged and are not selected unless they independently
+pass validation.
 
 ## Testing in ecos-release
 
 Installer tests belong only to `ecos-release`. They exercise behavior through
 subprocesses and temporary XDG roots rather than scanning generated shell text.
 
-The generator test suite covers:
+The generator and publication-validation test suites cover:
 
 - Deterministic output from identical validated metadata.
 - Rejection of missing assets, invalid digests, unsupported platforms, and
   inconsistent tags.
+- Structured rejection of traversal paths, escaping links, control characters,
+  special members, and empty Liberty inventories for every archive format.
 - POSIX syntax under `dash -n` and `bash -n`.
 - ShellCheck when available in CI.
 
@@ -505,24 +517,30 @@ a local HTTP server. They cover:
 - Checksum mismatch.
 - Unsupported OS, CPU, bitness, libc, and glibc version.
 - PATH guidance without shell-profile mutation.
-- Successful install and launcher execution.
-- Failed upgrade preserving the existing launcher and current version.
-- A corrupted same-version directory failing without changing the launcher or
+- Successful ECC-only wrapper execution without toolchain exports.
+- A toolchain wrapper exporting only `CHIPCOMPILER_OSS_CAD_DIR` and
+  `CHIPCOMPILER_ICS55_PDK_ROOT`, without modifying `PATH` or exporting
+  Yosys-specific variables.
+- An ECC-only upgrade preserving an already installed, validated expected
+  toolchain in the new wrapper.
+- Failed upgrade preserving the existing wrapper and current version.
+- A corrupted same-version directory failing without changing the wrapper or
   installed files.
-- Three successful versions remaining installed while the launcher selects the
+- Three successful versions remaining installed while the wrapper selects the
   newest one.
 - Idempotent reinstall of a valid same-version directory without deleting other
   versions.
 - A concurrent installer encountering a live lock failing without mutating or
   deleting installed state, and manual lock removal allowing a later retry.
-- Global receipt creation after launcher commit and receipt-write failure being
+- Global receipt creation after wrapper commit and receipt-write failure being
   non-fatal.
 - A missing, stale, or malformed prior receipt not affecting installation.
 - Refusal to overwrite an unowned binary or invalid same-version target.
 - Shadowed `ecc` detection and `XDG_CONFIG_HOME` receipt placement.
-- Rejection of traversal paths, escaping links, and special archive members for
-  every supported archive type.
-- Toolchain failure preserving a working ECC and prior env file.
+- Runtime checksum binding to publication-validated archive bytes and rejection
+  of unexpected post-extraction filesystem object types.
+- Toolchain failure committing a working ECC-only wrapper and preserving any
+  existing complete toolchain directories.
 - Real Yosys version and Slang frontend probes in the candidate environment.
 - Validation of every Liberty member in all three PDK Liberty archives.
 
@@ -543,20 +561,25 @@ of racing an active publication.
 
 The workflow performs these steps in order:
 
-1. Fetch and validate GitHub Release Asset metadata for the exact tag.
-2. Verify the expected CNB Release asset exists and matches the GitHub digest.
-3. Generate the versioned installer.
-4. Run generator, syntax, behavior, and real-artifact installation tests.
-5. Read the versioned OSS path. Create it with OSS forbid-overwrite semantics
+1. Fetch GitHub Release Asset metadata for the exact tag and download every ECC,
+   OSS CAD Suite, PDK base, and PDK supplemental archive referenced by the
+   release model.
+2. Verify every digest and run structured member validation against those exact
+   bytes, including complete Liberty inventory collection.
+3. Verify the expected CNB ECC asset exists and matches the validated GitHub
+   digest.
+4. Generate the versioned installer from the validated release model.
+5. Run generator, syntax, behavior, and real-artifact installation tests.
+6. Read the versioned OSS path. Create it with OSS forbid-overwrite semantics
    when absent; when present, accept it only if its bytes and required headers
    already match, otherwise fail without overwriting it.
-6. Read the object back anonymously and verify its bytes and response headers.
-7. Read the current `latest` installer when present. Refuse to replace a strictly
+7. Read the object back anonymously and verify its bytes and response headers.
+8. Read the current `latest` installer when present. Refuse to replace a strictly
    newer ECC version according to SemVer ordering.
-8. Replace `latest` with the exact same installer bytes. Publication credentials
+9. Replace `latest` with the exact same installer bytes. Publication credentials
    are scoped to this serialized workflow; other writers are outside the
    supported publication model.
-9. Read `latest` back anonymously and verify it matches the versioned object.
+10. Read `latest` back anonymously and verify it matches the versioned object.
 
 Publication tests cover an idempotent rerun, rejection of different bytes at an
 existing versioned path, an older SemVer release leaving `latest` unchanged, and
@@ -592,24 +615,26 @@ version remains supported at its versioned URL but never downgrades `latest`.
 - A versioned installer can be previewed in a browser and executed through
   `curl | sh`.
 - Default installation on Linux x86_64 glibc 2.34 or newer installs a working
-  ECC launcher without changing shell profiles.
+  ECC run-wrapper without changing shell profiles.
 - GitHub unavailability causes an automatic CNB fallback for the ECC bundle.
 - Every installed archive is verified against release-derived SHA-256 metadata.
 - Failed downloads, validation, extraction, or smoke tests do not replace the
-  existing working ECC launcher.
-- A corrupted same-version install fails without changing the active launcher or
+  existing working ECC wrapper.
+- A corrupted same-version install fails without changing the active wrapper or
   installed directory.
 - Concurrent installer invocations using the same data root cannot overlap
   installed-state mutation.
 - Installing a new ECC version does not delete any previously installed version.
 - A successful install writes a non-authoritative global receipt after switching
-  the launcher; receipt failure does not break the installed ECC.
+  the wrapper; receipt failure does not break the installed ECC.
 - `--with-toolchain` installs shared tools and PDK data below the ECC data root
   and does not globally shadow Yosys.
+- The wrapper exports only the managed OSS CAD Suite and PDK roots. It does not
+  modify `PATH`, export Yosys-specific variables, or affect the calling shell.
 - PDK validation checks every Liberty member supplied by all three Liberty
   archives and does not depend on STA flow configuration.
-- Archive validation prevents path, link, and special-file escape for every
-  installed archive.
+- Publication validates the complete structure of every referenced archive, and
+  runtime SHA-256 checks bind installation to those exact validated bytes.
 - Toolchain validation executes Yosys and verifies the Slang frontend in the
   same managed environment ECC will use.
 - Installer implementation and tests live only in `ecos-release`.
