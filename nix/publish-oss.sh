@@ -9,9 +9,9 @@ OSS_ENDPOINT="${OSS_ENDPOINT:-oss-cn-beijing.aliyuncs.com}"
 OSS_PUBLIC_BASE="${OSS_PUBLIC_BASE:-https://ecc-install-script.oss-cn-beijing.aliyuncs.com}"
 
 arg="${1:-}"
-if [[ -n "$arg" && -f "$arg" ]]; then
+if [[ -n $arg && -f $arg ]]; then
   installer="$arg"
-elif [[ -n "${ECC_INSTALLER:-}" ]]; then
+elif [[ -n ${ECC_INSTALLER:-} ]]; then
   installer="$ECC_INSTALLER"
 else
   echo "usage: publish-oss [ecc-installer.sh|v<tag>]" >&2
@@ -20,7 +20,7 @@ fi
 
 version="$(sed -n 's/^ECC_VERSION="\(.*\)"/\1/p' "$installer" | head -n1)"
 tag="v${version}"
-if [[ "$arg" == v* && "$arg" != "$tag" ]]; then
+if [[ $arg == v* && $arg != "$tag" ]]; then
   echo "tag $arg does not match installer $tag" >&2
   exit 1
 fi
@@ -46,7 +46,7 @@ ${oss_header:+${oss_header}
 put_object() {
   local key="$1" file="$2" content_type="$3" cache="$4" forbid="$5"
   local extra="" header_args=()
-  if [[ "$forbid" == "1" ]]; then
+  if [[ $forbid == "1" ]]; then
     extra="x-oss-forbid-overwrite:true"
     header_args+=(-H "x-oss-forbid-overwrite: true")
   fi
@@ -98,20 +98,20 @@ decision="$("$PUBLISH_DECIDE" "${current_file:-}" "$installer")"
 rm -f "$current_file"
 
 case "$decision" in
-  advance)
-    put_object "$latest" "$installer" "text/x-sh" "no-cache" 0
-    anon_latest="$(curl -fsS "${OSS_PUBLIC_BASE}/${latest}")"
-    if ! cmp -s "$installer" <(printf '%s' "$anon_latest"); then
-      echo "anonymous read of latest did not match" >&2
-      exit 1
-    fi
-    echo "published $versioned (latest advanced)"
-    ;;
-  keep)
-    echo "published $versioned (latest kept)"
-    ;;
-  *)
-    echo "publication rejected: ${decision:-empty}" >&2
+advance)
+  put_object "$latest" "$installer" "text/x-sh" "no-cache" 0
+  anon_latest="$(curl -fsS "${OSS_PUBLIC_BASE}/${latest}")"
+  if ! cmp -s "$installer" <(printf '%s' "$anon_latest"); then
+    echo "anonymous read of latest did not match" >&2
     exit 1
-    ;;
+  fi
+  echo "published $versioned (latest advanced)"
+  ;;
+keep)
+  echo "published $versioned (latest kept)"
+  ;;
+*)
+  echo "publication rejected: ${decision:-empty}" >&2
+  exit 1
+  ;;
 esac

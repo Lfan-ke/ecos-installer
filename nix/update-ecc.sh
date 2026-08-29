@@ -6,7 +6,7 @@ version="${tag#v}"
 
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 toml="$root/metadata/toolchain.toml"
-if [[ ! -f "$toml" ]]; then
+if [[ ! -f $toml ]]; then
   echo "metadata/toolchain.toml not found (run from the ecos-release checkout)" >&2
   exit 1
 fi

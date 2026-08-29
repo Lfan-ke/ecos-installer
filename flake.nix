@@ -1,14 +1,25 @@
 {
   description = "ECC installer generator";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      treefmt-nix,
+    }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       inherit (pkgs) lib;
+      treefmtEval = treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
 
       semver = import ./nix/semver.nix { inherit lib; };
       loadModel = import ./nix/model.nix { inherit lib semver; };
@@ -80,6 +91,8 @@
       };
     in
     {
+      formatter.${system} = treefmtEval.config.build.wrapper;
+
       packages.${system} = {
         ecc-installer = eccInstaller;
         default = eccInstaller;
@@ -124,11 +137,12 @@
         };
         installer-syntax = installerChecks.syntax;
         installer-e2e = installerChecks.e2e;
+        formatting = treefmtEval.config.build.check self;
       };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = [
-          pkgs.nixfmt
+          treefmtEval.config.build.wrapper
           pkgs.dash
           pkgs.shellcheck
           pkgs.python3

@@ -34,9 +34,10 @@ Data lands in `$XDG_DATA_HOME/ecc` (or `~/.local/share/ecc`). The wrapper goes t
 Pins live in `metadata/toolchain.toml`. The installer source is `templates/ecc-installer.sh.in`.
 
 ```sh
-nix build .#ecc-installer          # write ecc-installer.sh; does not fetch real archives
-nix run .#update-ecc -- v<tag>     # prefetch the ECC GitHub asset and update the [ecc] pin
-nix run .#publish-oss -- v<tag>    # PUT the immutable versioned object; advance latest by SemVer 2.0.0
+nix fmt                          # format Nix, Python, TOML, YAML, and shell
+nix build .#ecc-installer        # write ecc-installer.sh; does not fetch real archives
+nix run .#update-ecc -- v<tag>   # prefetch the ECC GitHub asset and update the [ecc] pin
+nix run .#publish-oss -- v<tag>  # PUT the immutable versioned object; advance latest by SemVer 2.0.0
 ```
 
 `update-ecc` only rewrites ECC pins. Bump OSS CAD Suite or PDK by editing the TOML.
@@ -55,5 +56,6 @@ Default checks do not download the real ECC, OSS CAD Suite, or PDK archives.
 | `archive` | `tarfile` safety on synthetic tars: traversal, absolute paths, control characters, escaping links, FIFOs, empty Liberty inventories |
 | `installer-syntax` | `dash -n`, `bash -n`, and `shellcheck -s dash -S error` on the generated script |
 | `installer-e2e` | Fake archives over local HTTP: GitHub success, GitHub failure then CNB, checksum mismatch, unsupported platform, wrapper env, lock, receipt, toolchain fallback |
+| `formatting` | `treefmt` dry-run: nixfmt, ruff, taplo, yamlfmt, shfmt |
 
-`nix develop` provides `nixfmt`, `dash`, and `shellcheck`.
+`nix develop` provides `treefmt`, `dash`, and `shellcheck`. `nix fmt` runs the same formatters as the `formatting` check.
