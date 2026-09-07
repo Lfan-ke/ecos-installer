@@ -7,25 +7,25 @@ Supported platform: Linux x86_64, glibc ≥ 2.34.
 ## Install ECC
 
 ```sh
-curl -fsSL https://ecc-install-script.oss-cn-beijing.aliyuncs.com/installers/ecc/latest/ecc-installer.sh | sh
+curl -fsSL https://release.openecos.com/installers/ecc/latest/ecc-installer.sh | sh
 ```
 
-With OSS CAD Suite and the ICS55 PDK:
+With OSS CAD Suite, the ICS55 PDK, and ecc-sizer:
 
 ```sh
-curl -fsSL https://ecc-install-script.oss-cn-beijing.aliyuncs.com/installers/ecc/latest/ecc-installer.sh | sh -s -- --with-toolchain
+curl -fsSL https://release.openecos.com/installers/ecc/latest/ecc-installer.sh | sh -s -- --with-toolchain
 ```
 
-`--download-source auto|github|cnb` selects the mirror (`auto` tries GitHub, then CNB). The PDK base archive is GitHub-only.
+`--download-source auto|github|cnb` selects the mirror (`auto` tries GitHub, then CNB). The PDK base's CNB mirror is a distinct git archive with its own SHA-256.
 
 If GitHub is unreachable, set a prefix that replaces `https://github.com`:
 
 ```sh
 export ECC_GITHUB_BASE_URL=https://ghfast.top/https://github.com
-curl -fsSL https://ecc-install-script.oss-cn-beijing.aliyuncs.com/installers/ecc/latest/ecc-installer.sh | sh
+curl -fsSL https://release.openecos.com/installers/ecc/latest/ecc-installer.sh | sh
 ```
 
-CNB URLs are not rewritten.
+CNB URLs are not rewritten. Direct OSS URLs skip Cloudflare and are not counted in Google Analytics.
 
 Data lands in `$XDG_DATA_HOME/ecc` (or `~/.local/share/ecc`). The wrapper goes to `$XDG_BIN_HOME` or `~/.local/bin`. `ECC_INSTALL_DIR` overrides the data root and must be an absolute path.
 
@@ -40,9 +40,10 @@ nix run .#update-ecc -- v<tag>   # prefetch the ECC GitHub asset and update the 
 nix run .#publish-oss -- v<tag>  # PUT the immutable versioned object; advance latest by SemVer 2.0.0
 ```
 
-`update-ecc` only rewrites ECC pins. Bump OSS CAD Suite or PDK by editing the TOML.
+`update-ecc` only rewrites ECC pins. Bump OSS CAD Suite, ecc-sizer, or the PDK by editing the TOML; for ecc-sizer keep `asset_name` and both URLs in sync with `version` (`ecc-sizer-<version>-linux-x64.tar.gz` embeds it in the basename and the tag), and set `cnb_sha256` only if the mirror bytes differ from GitHub's.
 
 Publishing needs `OSS_ACCESS_KEY_ID` and `OSS_ACCESS_KEY_SECRET`. A versioned object cannot be overwritten with different bytes. `latest` never moves to an older SemVer.
+
 
 ## `nix flake check`
 

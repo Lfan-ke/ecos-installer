@@ -26,42 +26,44 @@ CELL_LEFS = (
     "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef",
 )
 TECH_LEF = "prtech/techLEF/N551P6M_ecos.lef"
+SIZER_VERSION = "0.1.0-alpha"
+SIZER_ASSET = f"ecc-sizer-{SIZER_VERSION}-linux-x64.tar.gz"
 LIBERTY_SPECS = (
     (
         "ics55_LLSC_H7CH_liberty.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/liberty",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH",
         "h7ch.lib",
     ),
     (
         "ics55_LLSC_H7CL_liberty.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL",
         "h7cl.lib",
     ),
     (
         "ics55_LLSC_H7CR_liberty.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR",
         "h7cr.lib",
     ),
 )
 GDS_SPECS = (
     (
         "ics55_LLSC_H7CH_gds.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/gds",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH",
         "h7ch.gds",
     ),
     (
         "ics55_LLSC_H7CL_gds.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/gds",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL",
         "h7cl.gds",
     ),
     (
         "ics55_LLSC_H7CR_gds.tar.bz2",
-        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/gds",
+        "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR",
         "h7cr.gds",
     ),
     (
         "ICsprout_55LLULP1233_IO_251013_gds.tar.bz2",
-        "IP/IO/ICsprout_55LLULP1233_IO_251013/gds",
+        "IP/IO/ICsprout_55LLULP1233_IO_251013",
         "io.gds",
     ),
 )
@@ -80,6 +82,12 @@ PLACEHOLDERS = (
     "OSS_CAD_SHA256",
     "OSS_CAD_URL",
     "OSS_CAD_CNB_URL",
+    "SIZER_VERSION",
+    "SIZER_ASSET_NAME",
+    "SIZER_SHA256",
+    "SIZER_URL",
+    "SIZER_CNB_URL",
+    "SIZER_CNB_SHA256",
     "PDK_NAME",
     "PDK_VERSION",
     "PDK_BASE_ASSET_NAME",
@@ -113,7 +121,8 @@ def pack_tar(members: dict[str, bytes | None], *, compression: str) -> bytes:
             base = PurePosixPath(name).name
             info.mode = (
                 0o755
-                if content.startswith(b"#!") or base in {"ecc", "yosys", "torch_shm_manager"}
+                if content.startswith(b"#!")
+                or base in {"ecc", "yosys", "torch_shm_manager", "Sizer"}
                 else 0o644
             )
             tar.addfile(info, BytesIO(content))
@@ -134,6 +143,7 @@ fi
 if [ "$1" = "dump-env" ]; then
   printf 'OSS=%s\\n' "${{CHIPCOMPILER_OSS_CAD_DIR-}}"
   printf 'PDK=%s\\n' "${{CHIPCOMPILER_ICS55_PDK_ROOT-}}"
+  printf 'SIZER_ROOT=%s\\n' "${{CHIPCOMPILER_ECC_SIZER_ROOT-}}"
   printf 'PATH=%s\\n' "$PATH"
   printf 'YOSYS_PLUGINPATH=%s\\n' "${{YOSYS_PLUGINPATH-}}"
   printf 'YOSYS_DATDIR=%s\\n' "${{YOSYS_DATDIR-}}"
@@ -200,6 +210,103 @@ def build_oss_archive(*, slang: bool = True) -> bytes:
     )
 
 
+def sizer_script(version: str = SIZER_VERSION) -> bytes:
+    return f"""#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "OpenROAD v{version}"
+  echo "Usage : sizer -env <env_file> -f <cmd_file>"
+  exit 1
+fi
+exit 0
+""".encode()
+
+
+def build_sizer_archive(*, version: str = SIZER_VERSION) -> bytes:
+    return pack_tar(
+        {
+            f"ecc-sizer-{version}/bin/Sizer": sizer_script(version),
+            f"ecc-sizer-{version}/libexec/Sizer": b"ELF-sizer-payload\n",
+            f"ecc-sizer-{version}/lib/ld-linux-x86-64.so.2": b"ELF-loader\n",
+            f"ecc-sizer-{version}/src/sizer_os.tcl": b"# sizer os sentinel\n",
+        },
+        compression="gz",
+    )
+
+
+def build_sizer_symlink_archive() -> bytes:
+    # bin/Sizer symlinks to an executable that emits the correct banner, so
+    # only the symlink rejection (not the version smoke test) can fail it.
+    top = f"ecc-sizer-{SIZER_VERSION}"
+    script = sizer_script()
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name in (f"{top}/bin", f"{top}/lib", f"{top}/libexec", f"{top}/src"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(info)
+        info = tarfile.TarInfo(f"{top}/libexec/Sizer")
+        info.size = len(script)
+        info.mode = 0o755
+        tar.addfile(info, BytesIO(script))
+        loader = b"ELF-loader\n"
+        info = tarfile.TarInfo(f"{top}/lib/ld-linux-x86-64.so.2")
+        info.size = len(loader)
+        info.mode = 0o644
+        tar.addfile(info, BytesIO(loader))
+        sentinel = b"# sizer os sentinel\n"
+        info = tarfile.TarInfo(f"{top}/src/sizer_os.tcl")
+        info.size = len(sentinel)
+        info.mode = 0o644
+        tar.addfile(info, BytesIO(sentinel))
+        link = tarfile.TarInfo(f"{top}/bin/Sizer")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../libexec/Sizer"
+        link.mode = 0o755
+        tar.addfile(link)
+    return buffer.getvalue()
+
+
+def build_sizer_root_symlink_archive() -> bytes:
+    # The top-level ecc-sizer-<version> entry is a symlink to payload/, so a
+    # root found by following it validates but promote_dir would move only
+    # the link and leave a dangling destination behind.
+    top = f"ecc-sizer-{SIZER_VERSION}"
+    script = sizer_script()
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name in ("payload/bin", "payload/lib", "payload/libexec", "payload/src"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(info)
+        info = tarfile.TarInfo("payload/bin/Sizer")
+        info.size = len(script)
+        info.mode = 0o755
+        tar.addfile(info, BytesIO(script))
+        payload = b"ELF-sizer-payload\n"
+        info = tarfile.TarInfo("payload/libexec/Sizer")
+        info.size = len(payload)
+        info.mode = 0o755
+        tar.addfile(info, BytesIO(payload))
+        loader = b"ELF-loader\n"
+        info = tarfile.TarInfo("payload/lib/ld-linux-x86-64.so.2")
+        info.size = len(loader)
+        info.mode = 0o644
+        tar.addfile(info, BytesIO(loader))
+        sentinel = b"# sizer os sentinel\n"
+        info = tarfile.TarInfo("payload/src/sizer_os.tcl")
+        info.size = len(sentinel)
+        info.mode = 0o644
+        tar.addfile(info, BytesIO(sentinel))
+        root = tarfile.TarInfo(top)
+        root.type = tarfile.SYMTYPE
+        root.linkname = "payload"
+        root.mode = 0o755
+        tar.addfile(root)
+    return buffer.getvalue()
+
+
 def build_pdk_base_archive() -> bytes:
     members: dict[str, bytes | None] = {f"icsprout55-pdk/{TECH_LEF}": b"VERSION 5.8 ;\n"}
     for path in CELL_LEFS:
@@ -207,8 +314,11 @@ def build_pdk_base_archive() -> bytes:
     return pack_tar(members, compression="gz")
 
 
-def build_named_bz2(dest_file: str) -> bytes:
-    return pack_tar({dest_file: b"contents of %s\n" % dest_file.encode()}, compression="bz2")
+def build_named_bz2(kind: str, filename: str) -> bytes:
+    # Real supplemental archives carry a top-level liberty/ or gds/ directory,
+    # so the installer extracts them beside the cell or IO parent directory.
+    member = f"{kind}/{filename}"
+    return pack_tar({member: b"contents of %s\n" % member.encode()}, compression="bz2")
 
 
 def build_release_assets(*, version: str = "0.1.0-alpha.11") -> dict[str, PackedAsset]:
@@ -221,21 +331,23 @@ def build_release_assets(*, version: str = "0.1.0-alpha.11") -> dict[str, Packed
     assets["oss-cad-suite-linux-x64-20260827.tgz"] = PackedAsset(
         "oss-cad-suite-linux-x64-20260827.tgz", oss, sha256_bytes(oss)
     )
+    sizer = build_sizer_archive()
+    assets[SIZER_ASSET] = PackedAsset(SIZER_ASSET, sizer, sha256_bytes(sizer))
     pdk_base = build_pdk_base_archive()
     assets["icsprout55-pdk-v1.10.102.tar.gz"] = PackedAsset(
         "icsprout55-pdk-v1.10.102.tar.gz", pdk_base, sha256_bytes(pdk_base)
     )
     for name, dest, filename in LIBERTY_SPECS:
-        data = build_named_bz2(filename)
+        data = build_named_bz2("liberty", filename)
         assets[name] = PackedAsset(name, data, sha256_bytes(data), dest=dest, kind="liberty")
     for name, dest, filename in GDS_SPECS:
-        data = build_named_bz2(filename)
+        data = build_named_bz2("gds", filename)
         assets[name] = PackedAsset(name, data, sha256_bytes(data), dest=dest, kind="gds")
     return assets
 
 
 def liberty_paths() -> tuple[str, ...]:
-    return tuple(f"{dest}/{filename}" for _, dest, filename in LIBERTY_SPECS)
+    return tuple(f"{dest}/liberty/{filename}" for _, dest, filename in LIBERTY_SPECS)
 
 
 class AssetServer(ThreadingHTTPServer):
@@ -307,6 +419,7 @@ def render_installer(
 ) -> str:
     ecc = assets["ecc-cli-linux-x86_64.tar.gz"]
     oss = assets["oss-cad-suite-linux-x64-20260827.tgz"]
+    sizer = assets[SIZER_ASSET]
     pdk_base = assets["icsprout55-pdk-v1.10.102.tar.gz"]
     rows = []
     for spec in (*LIBERTY_SPECS, *GDS_SPECS):
@@ -337,6 +450,12 @@ def render_installer(
         "OSS_CAD_SHA256": oss.sha256,
         "OSS_CAD_URL": f"{base}/github/{oss.name}",
         "OSS_CAD_CNB_URL": f"{base}/cnb/{oss.name}",
+        "SIZER_VERSION": SIZER_VERSION,
+        "SIZER_ASSET_NAME": sizer.name,
+        "SIZER_SHA256": sizer.sha256,
+        "SIZER_URL": f"{base}/github/{sizer.name}",
+        "SIZER_CNB_URL": f"{base}/cnb/{sizer.name}",
+        "SIZER_CNB_SHA256": "",
         "PDK_NAME": "icsprout55",
         "PDK_VERSION": "v1.10.102",
         "PDK_BASE_ASSET_NAME": pdk_base.name,
@@ -509,8 +628,16 @@ def test_github_success(h: Harness) -> None:
     if wrapper.read_text().splitlines()[:2] != ["#!/bin/sh", "# ecos-release-wrapper-v1"]:
         fail("wrapper marker missing")
     dumped = read_wrapper_env(wrapper, env)
-    if dumped["OSS"] or dumped["PDK"] or dumped["YOSYS_PLUGINPATH"] or dumped["YOSYS_DATDIR"]:
+    if (
+        dumped["OSS"]
+        or dumped["PDK"]
+        or dumped["SIZER_ROOT"]
+        or dumped["YOSYS_PLUGINPATH"]
+        or dumped["YOSYS_DATDIR"]
+    ):
         fail(f"ecc-only install leaked toolchain env: {dumped}")
+    if str(data / "tools" / "ecc-sizer" / SIZER_VERSION / "bin") in dumped["PATH"].split(":"):
+        fail("ecc-only install leaked sizer bin onto PATH")
     receipt = json.loads((config / "ecc-receipt.json").read_text())
     if receipt["binaries"] != ["ecc"] or receipt["version"] != "0.1.0-alpha.11":
         fail(receipt)
@@ -649,14 +776,21 @@ def test_toolchain_wrapper(h: Harness) -> None:
     dumped = read_wrapper_env(bindir / "ecc", env)
     oss = data / "tools" / "oss-cad-suite" / "20260827"
     pdk = data / "pdks" / "icsprout55" / "v1.10.102"
-    if dumped["OSS"] != str(oss) or dumped["PDK"] != str(pdk):
+    sizer = data / "tools" / "ecc-sizer" / SIZER_VERSION
+    if dumped["OSS"] != str(oss) or dumped["PDK"] != str(pdk) or dumped["SIZER_ROOT"] != str(sizer):
         fail(dumped)
     if str(oss / "bin") in dumped["PATH"].split(":"):
         fail("oss bin leaked onto PATH")
+    if str(sizer / "bin") not in dumped["PATH"].split(":"):
+        fail("sizer bin missing from wrapper PATH; ECC cannot discover Sizer")
     if dumped["YOSYS_PLUGINPATH"] or dumped["YOSYS_DATDIR"]:
         fail(dumped)
     if not (oss / "bin" / "yosys").is_file():
         fail("yosys missing")
+    if not (sizer / "bin" / "Sizer").is_file() or not os.access(sizer / "bin" / "Sizer", os.X_OK):
+        fail("sizer missing or not executable")
+    if not (sizer / "libexec" / "Sizer").is_file():
+        fail("sizer libexec payload missing")
     for liberty in liberty_paths():
         if (pdk / liberty).stat().st_size <= 0:
             fail(liberty)
@@ -676,8 +810,14 @@ def test_ecc_only_upgrade_preserves_toolchain(h: Harness) -> None:
     dumped = read_wrapper_env(bindir / "ecc", env)
     if not dumped["OSS"].endswith("/tools/oss-cad-suite/20260827"):
         fail(dumped)
+    if not dumped["SIZER_ROOT"].endswith(f"/tools/ecc-sizer/{SIZER_VERSION}"):
+        fail(dumped)
+    if f"/tools/ecc-sizer/{SIZER_VERSION}/bin" not in dumped["PATH"]:
+        fail("sizer bin missing from wrapper PATH after ecc-only upgrade")
     if not (data / "v0.1.0-alpha.11").is_dir() or not (data / "v0.1.0-alpha.12").is_dir():
         fail("version dirs missing")
+    if not (data / "tools" / "ecc-sizer" / SIZER_VERSION / "bin" / "Sizer").is_file():
+        fail("sizer missing after ecc-only upgrade")
 
 
 def test_failed_first_install(h: Harness) -> None:
@@ -927,6 +1067,113 @@ def test_toolchain_failure_keeps_wrapper(h: Harness) -> None:
         }
 
 
+def test_sizer_bad_layout(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    bad = pack_tar({"ecc-sizer-0.1.0-alpha/README": b"no binaries here\n"}, compression="gz")
+    saved_github = h.routes[f"/github/{SIZER_ASSET}"]
+    try:
+        h.routes[f"/github/{SIZER_ASSET}"] = {"data": bad}
+        mutated = dict(h.assets)
+        mutated[SIZER_ASSET] = PackedAsset(SIZER_ASSET, bad, sha256_bytes(bad))
+        result = run_installer(
+            h.installer(root / "installer.sh", assets=mutated), env, "--with-toolchain"
+        )
+        if result.returncode == 0 or "missing the expected bin/Sizer layout" not in result.stderr:
+            fail(result.stderr)
+        data = Path(env["XDG_DATA_HOME"]) / "ecc"
+        if (data / "tools" / "ecc-sizer" / SIZER_VERSION).exists():
+            fail("partial sizer install survived layout failure")
+    finally:
+        h.routes[f"/github/{SIZER_ASSET}"] = saved_github
+
+
+def test_sizer_wrong_version_banner(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    # 0.1.0-alpha.1 satisfies an unanchored "v0.1.0-alpha" substring match,
+    # so this pins the exact-token comparison.
+    bad = build_sizer_archive(version="0.1.0-alpha.1")
+    saved_github = h.routes[f"/github/{SIZER_ASSET}"]
+    try:
+        h.routes[f"/github/{SIZER_ASSET}"] = {"data": bad}
+        mutated = dict(h.assets)
+        mutated[SIZER_ASSET] = PackedAsset(SIZER_ASSET, bad, sha256_bytes(bad))
+        result = run_installer(
+            h.installer(root / "installer.sh", assets=mutated), env, "--with-toolchain"
+        )
+        if result.returncode == 0 or "ecc-sizer validation failed" not in result.stderr:
+            fail(result.stderr)
+        data = Path(env["XDG_DATA_HOME"]) / "ecc"
+        if (data / "tools" / "ecc-sizer" / SIZER_VERSION).exists():
+            fail("partial sizer install survived banner mismatch")
+    finally:
+        h.routes[f"/github/{SIZER_ASSET}"] = saved_github
+
+
+def test_sizer_symlink_rejected(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    bad = build_sizer_symlink_archive()
+    saved_github = h.routes[f"/github/{SIZER_ASSET}"]
+    try:
+        h.routes[f"/github/{SIZER_ASSET}"] = {"data": bad}
+        mutated = dict(h.assets)
+        mutated[SIZER_ASSET] = PackedAsset(SIZER_ASSET, bad, sha256_bytes(bad))
+        result = run_installer(
+            h.installer(root / "installer.sh", assets=mutated), env, "--with-toolchain"
+        )
+        if result.returncode == 0 or "ecc-sizer validation failed" not in result.stderr:
+            fail(result.stderr)
+        data = Path(env["XDG_DATA_HOME"]) / "ecc"
+        if (data / "tools" / "ecc-sizer" / SIZER_VERSION).exists():
+            fail("partial sizer install survived symlink rejection")
+    finally:
+        h.routes[f"/github/{SIZER_ASSET}"] = saved_github
+
+
+def test_sizer_root_symlink_rejected(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    bad = build_sizer_root_symlink_archive()
+    saved_github = h.routes[f"/github/{SIZER_ASSET}"]
+    try:
+        h.routes[f"/github/{SIZER_ASSET}"] = {"data": bad}
+        mutated = dict(h.assets)
+        mutated[SIZER_ASSET] = PackedAsset(SIZER_ASSET, bad, sha256_bytes(bad))
+        result = run_installer(
+            h.installer(root / "installer.sh", assets=mutated), env, "--with-toolchain"
+        )
+        if result.returncode == 0 or "ecc-sizer validation failed" not in result.stderr:
+            fail(result.stderr)
+        dest = Path(env["XDG_DATA_HOME"]) / "ecc" / "tools" / "ecc-sizer" / SIZER_VERSION
+        if dest.exists() or dest.is_symlink():
+            fail("dangling sizer destination survived root symlink rejection")
+    finally:
+        h.routes[f"/github/{SIZER_ASSET}"] = saved_github
+
+
+def test_missing_sizer_blocks_toolchain_export(h: Harness) -> None:
+    root = h.tmp()
+    env = xdg_env(root)
+    first = h.installer(root / "first.sh")
+    if run_installer(first, env, "--with-toolchain").returncode != 0:
+        fail("first toolchain install failed")
+    data, bindir, _cache, _config = roots(env)
+    shutil.rmtree(data / "tools" / "ecc-sizer" / SIZER_VERSION)
+    second = h.installer(root / "second.sh", version="0.1.0-alpha.12")
+    result = run_installer(second, env)
+    if result.returncode != 0:
+        fail(result.stderr)
+    if "without the managed toolchain" not in result.stderr:
+        fail(result.stderr)
+    dumped = read_wrapper_env(bindir / "ecc", env)
+    if dumped["OSS"] or dumped["PDK"] or dumped["SIZER_ROOT"]:
+        fail(f"incomplete toolchain exported: {dumped}")
+    if f"/tools/ecc-sizer/{SIZER_VERSION}/bin" in dumped["PATH"]:
+        fail("sizer bin exported onto PATH with incomplete toolchain")
+
+
 def test_conflicting_flags(h: Harness) -> None:
     root = h.tmp()
     installer = h.installer(root / "installer.sh")
@@ -956,11 +1203,13 @@ def test_cnb_mode_toolchain(h: Harness) -> None:
         )
         if result.returncode != 0:
             fail(result.stderr)
-        if "no CNB mirror" in result.stderr:
+        if "no CNB URL" in result.stderr:
             fail(result.stderr)
         data = Path(env["XDG_DATA_HOME"]) / "ecc"
         if not (data / "tools" / "oss-cad-suite" / "20260827" / "bin" / "yosys").is_file():
             fail("cnb toolchain missing yosys")
+        if not (data / "tools" / "ecc-sizer" / SIZER_VERSION / "bin" / "Sizer").is_file():
+            fail("cnb toolchain missing sizer")
     finally:
         h.routes.clear()
         h.routes.update(saved)
@@ -971,6 +1220,7 @@ def test_toolchain_github_fallback(h: Harness) -> None:
     try:
         h.routes["/github/oss-cad-suite-linux-x64-20260827.tgz"] = {"status": 500}
         h.routes["/github/icsprout55-pdk-v1.10.102.tar.gz"] = {"status": 500}
+        h.routes[f"/github/{SIZER_ASSET}"] = {"status": 500}
         for spec in (*LIBERTY_SPECS, *GDS_SPECS):
             h.routes[f"/github/{spec[0]}"] = {"status": 500}
         root = h.tmp()
@@ -1048,6 +1298,11 @@ CASES = [
     test_shadowed_ecc,
     test_unexpected_member_type,
     test_toolchain_failure_keeps_wrapper,
+    test_sizer_bad_layout,
+    test_sizer_wrong_version_banner,
+    test_sizer_symlink_rejected,
+    test_sizer_root_symlink_rejected,
+    test_missing_sizer_blocks_toolchain_export,
     test_conflicting_flags,
     test_cnb_mode_toolchain,
     test_toolchain_github_fallback,

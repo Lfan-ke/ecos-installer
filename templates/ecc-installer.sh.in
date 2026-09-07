@@ -30,6 +30,12 @@ OSS_CAD_ASSET_NAME="@OSS_CAD_ASSET_NAME@"
 OSS_CAD_SHA256="@OSS_CAD_SHA256@"
 OSS_CAD_URL="@OSS_CAD_URL@"
 OSS_CAD_CNB_URL="@OSS_CAD_CNB_URL@"
+SIZER_VERSION="@SIZER_VERSION@"
+SIZER_ASSET_NAME="@SIZER_ASSET_NAME@"
+SIZER_SHA256="@SIZER_SHA256@"
+SIZER_URL="@SIZER_URL@"
+SIZER_CNB_URL="@SIZER_CNB_URL@"
+SIZER_CNB_SHA256="@SIZER_CNB_SHA256@"
 PDK_NAME="@PDK_NAME@"
 PDK_VERSION="@PDK_VERSION@"
 PDK_BASE_ASSET_NAME="@PDK_BASE_ASSET_NAME@"
@@ -75,7 +81,7 @@ OPTIONS:
             Disable progress output
 
         --with-toolchain
-            Install OSS CAD Suite and the ICS55 PDK
+            Install OSS CAD Suite, the ICS55 PDK, and ecc-sizer
 
         --download-source auto|github|cnb
             Select download source for mirrored assets (default: auto)
@@ -709,6 +715,22 @@ find_oss_root() {
     return 1
 }
 
+find_sizer_root() {
+    local _staging="$1"
+    local _cand
+    if [ -e "$_staging/bin/Sizer" ] && [ -e "$_staging/libexec/Sizer" ]; then
+        printf '%s\n' "$_staging"
+        return 0
+    fi
+    for _cand in "$_staging"/*; do
+        if [ -e "$_cand/bin/Sizer" ] && [ -e "$_cand/libexec/Sizer" ]; then
+            printf '%s\n' "$_cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
 find_pdk_root() {
     local _staging="$1"
     local _cand
@@ -784,6 +806,39 @@ validate_oss_dir() {
         return 0
     fi
     return 1
+}
+
+validate_sizer_dir() {
+    local _dir="$1"
+    local _out
+    local _path
+    if [ ! -d "$_dir" ] || [ -L "$_dir" ]; then
+        return 1
+    fi
+    for _path in "$_dir/bin" "$_dir/libexec" "$_dir/lib"; do
+        if [ ! -d "$_path" ] || [ -L "$_path" ]; then
+            return 1
+        fi
+    done
+    for _path in "$_dir/bin/Sizer" "$_dir/libexec/Sizer" "$_dir/lib/ld-linux-x86-64.so.2" "$_dir/src/sizer_os.tcl"; do
+        if [ ! -f "$_path" ] || [ -L "$_path" ]; then
+            return 1
+        fi
+    done
+    if [ ! -x "$_dir/bin/Sizer" ] || [ ! -x "$_dir/libexec/Sizer" ]; then
+        return 1
+    fi
+    _out="$(run_without_loader_env "$_dir/bin/Sizer" --version 2>&1)"
+    printf '%s\n' "$_out" | awk -v want="v${SIZER_VERSION}" '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == want) {
+                    found = 1
+                }
+            }
+        }
+        END { exit found ? 0 : 1 }
+    '
 }
 
 validate_pdk_dir() {
@@ -873,6 +928,38 @@ install_oss_cad() {
     printf '%s\n' "$_dest"
 }
 
+install_sizer() {
+    local _archive="$1"
+    local _dest="${DATA_ROOT}/tools/ecc-sizer/${SIZER_VERSION}"
+    local _staging
+    local _root
+    if [ -e "$_dest" ]; then
+        if [ -d "$_dest" ] && validate_sizer_dir "$_dest"; then
+            say "reusing existing ecc-sizer ${SIZER_VERSION}"
+            printf '%s\n' "$_dest"
+            return 0
+        fi
+        err "existing ecc-sizer directory ${_dest} is invalid and will not be replaced in place"
+    fi
+    _staging="$(new_staging)"
+    extract_archive "$_archive" "$_staging"
+    if ! _root="$(find_sizer_root "$_staging")"; then
+        err "ecc-sizer archive is missing the expected bin/Sizer layout"
+    fi
+    if ! validate_sizer_dir "$_root"; then
+        err "ecc-sizer validation failed"
+    fi
+    if [ "$_root" = "$_staging" ]; then
+        promote_dir "$_staging" "$_dest"
+        clear_staging
+    else
+        promote_dir "$_root" "$_dest"
+        rm -rf "$_staging"
+        clear_staging
+    fi
+    printf '%s\n' "$_dest"
+}
+
 prefetch_pdk_supplementals() {
     local _name
     local _sha
@@ -943,19 +1030,23 @@ install_pdk() {
 select_existing_toolchain() {
     local _oss="${DATA_ROOT}/tools/oss-cad-suite/${OSS_CAD_VERSION}"
     local _pdk="${DATA_ROOT}/pdks/${PDK_NAME}/${PDK_VERSION}"
-    if [ -d "$_oss" ] && [ -d "$_pdk" ] && validate_oss_dir "$_oss" && validate_pdk_dir "$_pdk"; then
+    local _sizer="${DATA_ROOT}/tools/ecc-sizer/${SIZER_VERSION}"
+    if [ -d "$_oss" ] && [ -d "$_pdk" ] && [ -d "$_sizer" ] && validate_oss_dir "$_oss" && validate_pdk_dir "$_pdk" && validate_sizer_dir "$_sizer"; then
         OSS_ROOT="$_oss"
         PDK_ROOT="$_pdk"
+        SIZER_ROOT="$_sizer"
         return 0
     fi
     OSS_ROOT=""
     PDK_ROOT=""
+    SIZER_ROOT=""
     return 1
 }
 
 write_wrapper() {
     local _oss_root="$1"
     local _pdk_root="$2"
+    local _sizer_root="$3"
     local _tmp
     local _dest="${BIN_DIR}/ecc"
     _tmp="$(mktemp "${BIN_DIR}/ecc.XXXXXX")"
@@ -967,6 +1058,10 @@ write_wrapper() {
         if [ -n "$_oss_root" ] && [ -n "$_pdk_root" ]; then
             printf 'export CHIPCOMPILER_OSS_CAD_DIR=%s\n' "$(shell_quote "$_oss_root")"
             printf 'export CHIPCOMPILER_ICS55_PDK_ROOT=%s\n' "$(shell_quote "$_pdk_root")"
+        fi
+        if [ -n "$_sizer_root" ]; then
+            printf 'export CHIPCOMPILER_ECC_SIZER_ROOT=%s\n' "$(shell_quote "$_sizer_root")"
+            printf 'export PATH=%s:"$PATH"\n' "$(shell_quote "${_sizer_root}/bin")"
         fi
         printf '%s\n' 'exec "$ECC_DATA_ROOT/$ECC_VERSION/ecc" "$@"'
     } > "$_tmp"
@@ -1031,9 +1126,11 @@ main() {
 
     ECC_ARCHIVE="$(download_ecc)"
     OSS_ARCHIVE=""
+    SIZER_ARCHIVE=""
     PDK_ARCHIVE=""
     if [ "$WITH_TOOLCHAIN" = 1 ]; then
         OSS_ARCHIVE="$(download_by_source "$OSS_CAD_SHA256" "$OSS_CAD_ASSET_NAME" "$OSS_CAD_URL" "$OSS_CAD_CNB_URL")"
+        SIZER_ARCHIVE="$(download_by_source "$SIZER_SHA256" "$SIZER_ASSET_NAME" "$SIZER_URL" "$SIZER_CNB_URL" "$SIZER_CNB_SHA256")"
         PDK_ARCHIVE="$(download_by_source "$PDK_BASE_SHA256" "$PDK_BASE_ASSET_NAME" "$PDK_BASE_URL" "$PDK_BASE_CNB_URL" "$PDK_BASE_CNB_SHA256")"
         prefetch_pdk_supplementals
     fi
@@ -1044,10 +1141,12 @@ main() {
 
     OSS_ROOT=""
     PDK_ROOT=""
+    SIZER_ROOT=""
     if [ "$WITH_TOOLCHAIN" = 1 ]; then
         OSS_ROOT="$(install_oss_cad "$OSS_ARCHIVE")"
         PDK_ROOT="$(install_pdk "$PDK_ARCHIVE")"
-        if [ -z "$OSS_ROOT" ] || [ -z "$PDK_ROOT" ]; then
+        SIZER_ROOT="$(install_sizer "$SIZER_ARCHIVE")"
+        if [ -z "$OSS_ROOT" ] || [ -z "$PDK_ROOT" ] || [ -z "$SIZER_ROOT" ]; then
             err "toolchain installation failed"
         fi
     elif select_existing_toolchain; then
@@ -1056,7 +1155,7 @@ main() {
         say "ECC was installed without the managed toolchain"
     fi
 
-    write_wrapper "$OSS_ROOT" "$PDK_ROOT"
+    write_wrapper "$OSS_ROOT" "$PDK_ROOT" "$SIZER_ROOT"
     write_receipt
     say "installed ECC ${ECC_VERSION} to ${DATA_ROOT}/${ECC_TAG}"
     print_path_guidance
