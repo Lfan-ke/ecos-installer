@@ -1,0 +1,292 @@
+# Single source of truth for every ECOS toolchain component.
+#
+# This file carries only rules and metadata: registry metadata (name/
+# display_name/description/category/homepage/requires), version-source rules
+# (src), and interpolation templates (url_template/cnb_url_template/
+# strip_prefix/name_template/version_map). The lock data those rules resolve
+# to (version/url/sha256/size) lives in the machine-generated
+# nix/_sources/generated.json; never edit that file by hand.
+#
+# Two Nix projections merge this file with the lock file (nix/locks.nix):
+#   - templates/ecc-installer.sh.in via nix/generate.nix (installer pins)
+#   - nix/generate-registry.nix (tool-registry.json for ECOS Studio)
+#
+# Template placeholders: {version} = locked upstream version as-is,
+# {version^} = without a leading "v", {registry} = after version_map,
+# {registry^} = again without a leading "v". version_map is one of
+# "identity" (default), "strip_dashes", or { strip_prefix = "<literal>" }.
+# Field sets per section are validated in nix/model.nix; unknown sections or
+# fields fail the build.
+
+[platform]
+os = "linux"
+cpu = "x86_64"
+min_glibc = "2.34"
+
+[ecc]
+# registry metadata
+name = "ecc"
+display_name = "ECOS Chip Compiler"
+description = "ECOS Chip Compiler (ECC) CLI integrating Yosys, ECC-DreamPlace, ECC-Tools, and KLayout for a complete RTL-to-GDS design flow."
+category = "backend"
+homepage = "https://github.com/openecos-projects/ecc"
+requires = ["tool:yosys", "pdk:ics55"]
+# rules
+src = { github = "openecos-projects/ecc", prerelease = true }
+version_map = { strip_prefix = "v" }
+url_template = "https://github.com/openecos-projects/ecc/releases/download/{version}/ecc-cli-linux-x86_64.tar.gz"
+cnb_url_template = "https://cnb.cool/ecoslab/ecc/-/releases/download/{version}/ecc-cli-linux-x86_64.tar.gz"
+
+[oss_cad_suite]
+# registry metadata; the registry entity name differs from the section name
+name = "yosys"
+display_name = "Yosys"
+description = "Yosys from the OSS CAD Suite distribution."
+category = "synthesis"
+homepage = "https://github.com/YosysHQ/oss-cad-suite-build"
+requires = []
+# rules
+src = { github = "YosysHQ/oss-cad-suite-build" }
+version_map = "strip_dashes"
+url_template = "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/{version}/oss-cad-suite-linux-x64-{registry}.tgz"
+cnb_url_template = "https://cnb.cool/ecoslab/oss-cad-suite-build/-/releases/download/{version}/oss-cad-suite-linux-x64-{registry}.tgz"
+strip_prefix = "oss-cad-suite"
+
+[sizer]
+# installer-only component; not projected into the registry
+src = { github = "openecos-projects/ecc-sizer", prerelease = true }
+version_map = { strip_prefix = "v" }
+url_template = "https://github.com/openecos-projects/ecc-sizer/releases/download/{version}/ecc-sizer-{version^}-linux-x64.tar.gz"
+cnb_url_template = "https://cnb.cool/ecoslab/ecc-sizer/-/releases/download/{version}/ecc-sizer-{version^}-linux-x64.tar.gz"
+
+# The ecc-fe family and surfer below are still pinned to the mutable
+# `-latest` tags of openecos-projects/ecos-resource-assets. Immutable
+# versioned releases (tar.gz + versioned .metadata.json sidecar) must be
+# published there first; until then version/metadata_url keep the imported
+# registry values verbatim. Update the lock entry and metadata_url together
+# once the versioned releases exist.
+
+[ecc-fe]
+name = "ecc-fe"
+display_name = "ECC-FE Frontend Flow"
+description = "ECOS frontend flow runtime CLI used by ECOS Studio to create workspaces and run Review, Elab, Lint, Sim, and Wave metadata steps."
+category = "frontend"
+homepage = "https://github.com/openecos-projects/ecc-fe"
+requires = [
+  "tool:ecc-fe-cpu-rtl",
+  "tool:ecc-fe-soc-ysyx-am",
+  "tool:ecc-fe-difftest-ref",
+  "tool:ecc-fe-examples",
+  "tool:slang",
+  "tool:verilator",
+  "tool:riscv-toolchain",
+]
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-{version}/ecc-fe-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-latest/ecc-fe-latest.metadata.json"
+strip_prefix = "ecc-fe-{version}"
+
+[ecc-fe-cpu-rtl]
+name = "ecc-fe-cpu-rtl"
+display_name = "ECC-FE CPU RTL Resources"
+description = "Installable ECC-FE third-party CPU RTL snapshots used by frontend simulation adapters."
+category = "frontend"
+homepage = "https://github.com/openecos-projects/ecc-fe"
+requires = []
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-cpu-rtl-{version}/ecc-fe-cpu-rtl-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-cpu-rtl-latest/ecc-fe-cpu-rtl-latest.metadata.json"
+strip_prefix = "ecc-fe-cpu-rtl-{version}"
+
+[ecc-fe-soc-ysyx-am]
+name = "ecc-fe-soc-ysyx-am"
+display_name = "ECC-FE YSYX AM SoC Harness"
+description = "Installable SoC harness resource used by ECC-FE simulation flows for CPU tests and CoreMark."
+category = "frontend"
+homepage = "https://github.com/openecos-projects/ecc-fe"
+requires = ["tool:ecc-fe-cpu-rtl", "tool:ecc-fe-difftest-ref"]
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-{version}/ecc-fe-soc-ysyx-am-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-soc-ysyx-am-latest/ecc-fe-soc-ysyx-am-latest.metadata.json"
+strip_prefix = "ecc-fe-soc-ysyx-am-{version}"
+
+[ecc-fe-difftest-ref]
+name = "ecc-fe-difftest-ref"
+display_name = "ECC-FE Difftest Reference Model"
+description = "Installable ECC-FE Spike-based difftest reference shared object used by SoC simulation flows."
+category = "frontend"
+homepage = "https://github.com/openecos-projects/ecc-fe"
+requires = []
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-difftest-ref-{version}/ecc-fe-difftest-ref-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-difftest-ref-latest/ecc-fe-difftest-ref-latest.metadata.json"
+strip_prefix = "ecc-fe-difftest-ref-{version}"
+
+[ecc-fe-examples]
+name = "ecc-fe-examples"
+display_name = "ECC-FE Examples"
+description = "Installable ECC-FE example CPU projects and filelists used by frontend flow demos and validation."
+category = "frontend"
+homepage = "https://github.com/openecos-projects/ecc-fe"
+requires = []
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-examples-{version}/ecc-fe-examples-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/ecc-fe-examples-latest/ecc-fe-examples-latest.metadata.json"
+strip_prefix = "ecc-fe-examples-{version}"
+
+[slang]
+name = "slang"
+display_name = "Slang"
+description = "SystemVerilog compiler and elaboration frontend used by ECC-FE ELAB and lint diagnostics."
+category = "frontend"
+homepage = "https://github.com/MikePopoloski/slang"
+requires = []
+src = { github = "MikePopoloski/slang" }
+version_map = { strip_prefix = "v" }
+url_template = "https://github.com/MikePopoloski/slang/releases/download/{version}/slang-linux-x86_64.tar.gz"
+
+[verilator]
+name = "verilator"
+display_name = "Verilator"
+description = "Pinned Verilator 5.050 SystemVerilog simulator used by ECC-FE Lint and Sim flows."
+category = "simulation"
+homepage = "https://github.com/verilator/verilator"
+requires = []
+# nvchecker applies include_regex as a full match, so the pattern must
+# cover the entire tag
+src = { github_tag = "openecos-projects/ecos-resource-assets", include_regex = "verilator-v.*" }
+version_map = { strip_prefix = "verilator-v" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/{version}/{version}-linux-x86_64.tar.gz"
+strip_prefix = "{version}-linux-x86_64"
+
+[riscv-toolchain]
+name = "riscv-toolchain"
+display_name = "RISC-V GCC & Binutils Toolchain"
+description = "Pinned RISC-V GNU bare-metal toolchain providing GCC, LD, objdump, and objcopy for CPU tests, CoreMark, ELF binaries, and source-aware disassembly."
+category = "toolchain"
+homepage = "https://github.com/riscv-collab/riscv-gnu-toolchain"
+requires = []
+src = { github = "riscv-collab/riscv-gnu-toolchain" }
+url_template = "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/{version}/riscv64-elf-ubuntu-22.04-gcc.tar.xz"
+strip_prefix = "riscv"
+
+[surfer]
+name = "surfer"
+display_name = "Surfer Web Assets"
+description = "Offline Surfer waveform viewer web assets used by ECOS Studio Wave."
+category = "viewer"
+homepage = "https://github.com/Luyoung0001/surfer"
+requires = []
+src = { manual = "latest" }
+url_template = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/surfer-{version}/surfer-{version}.tar.gz"
+metadata_url = "https://github.com/openecos-projects/ecos-resource-assets/releases/download/surfer-latest/surfer-latest.metadata.json"
+strip_prefix = "surfer-{version}"
+
+[pdk]
+# collection: a virtual registry entry backed by one base package plus
+# individually locked liberty/gds packages ([[pdk_pkg]] below). Its version
+# comes from the base package's lock entry; all 8 package locks must agree.
+id = "ics55"
+name = "icsprout55"
+display_name = "ICsprout 55nm PDK"
+description = "ICsprout 55nm open-source process design kit."
+category = "pdk"
+homepage = "https://github.com/openecos-projects/icsprout55-pdk"
+src = { manual = "v1.10.102" }
+requires = [
+  "pdk_pkg:icsprout55-base",
+  "pdk_pkg:ics55_LLSC_H7CH_liberty",
+  "pdk_pkg:ics55_LLSC_H7CL_liberty",
+  "pdk_pkg:ics55_LLSC_H7CR_liberty",
+  "pdk_pkg:ics55_LLSC_H7CH_gds",
+  "pdk_pkg:ics55_LLSC_H7CL_gds",
+  "pdk_pkg:ics55_LLSC_H7CR_gds",
+  "pdk_pkg:ICsprout_55LLULP1233_IO_251013_gds",
+]
+tech_lef = "prtech/techLEF/N551P6M_ecos.lef"
+cell_lefs = [
+  "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef",
+  "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef",
+]
+liberty_files = [
+  "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_ss_rcworst_1p08_125_nldm.lib",
+  "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib",
+  "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib",
+]
+
+# Base package (git archive). The installer always extracts it to the PDK
+# root, so it carries no dest. The CNB git archive has different bytes from
+# the GitHub tarball, hence needs_cnb_sha256.
+[[pdk_pkg]]
+id = "icsprout55-base"
+kind = "base"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/{version}.tar.gz"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/git/archive/{version}.tar.gz"
+needs_cnb_sha256 = true
+name_template = "icsprout55-pdk-{version}.tar.gz"
+strip_prefix = "icsprout55-pdk-{version^}"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CH_liberty"
+kind = "liberty"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CH_liberty.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CH_liberty.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CL_liberty"
+kind = "liberty"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CL_liberty.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CL_liberty.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CR_liberty"
+kind = "liberty"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CR_liberty.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CR_liberty.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CH_gds"
+kind = "gds"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CH_gds.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CH_gds.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CL_gds"
+kind = "gds"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CL_gds.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CL_gds.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL"
+
+[[pdk_pkg]]
+id = "ics55_LLSC_H7CR_gds"
+kind = "gds"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ics55_LLSC_H7CR_gds.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ics55_LLSC_H7CR_gds.tar.bz2"
+dest = "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR"
+
+[[pdk_pkg]]
+id = "ICsprout_55LLULP1233_IO_251013_gds"
+kind = "gds"
+url_template = "https://github.com/openecos-projects/icsprout55-pdk/releases/download/{version}/ICsprout_55LLULP1233_IO_251013_gds.tar.bz2"
+cnb_url_template = "https://cnb.cool/ecoslab/icsprout55-pdk/-/releases/download/{version}/ICsprout_55LLULP1233_IO_251013_gds.tar.bz2"
+dest = "IP/IO/ICsprout_55LLULP1233_IO_251013"
+
+[mpc-frame]
+id = "mpc-frame"
+display_name = "MPC Frame"
+description = "Multi-project chip frame template and reference SoC design."
+category = "mpc"
+homepage = "https://github.com/openecos-projects/mpc-frame"
+platform = "all-platform"
+src = { git = "https://github.com/openecos-projects/mpc-frame", branch = "main" }
+url_template = "https://github.com/openecos-projects/mpc-frame/archive/{version}.tar.gz"
+# Seed state: the locked version is the 0.1.0 seed while the locked url and
+# the extracted directory embed the upstream commit. The url_template
+# consistency check is exempted (nix/locks.nix) and strip_prefix stays static
+# until the first bump advances the version to commit form.
+strip_prefix = "mpc-frame-01ac0615e3b6d73db605afaf7c67851ef0cf5767"
+update_source = { type = "github_branch", branch = "main" }

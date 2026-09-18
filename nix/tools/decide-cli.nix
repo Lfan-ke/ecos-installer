@@ -6,8 +6,9 @@
 
 let
   lib = import (pkgsPath + "/lib");
-  semver = import ./semver.nix { inherit lib; };
-  publish = import ./publish.nix { inherit lib semver; };
+  # our SemVer helpers and the publish policy live in the repo library
+  libs = import ../../lib { inherit lib; };
+  publish = libs.publish;
   current = if currentFile == "" then null else builtins.readFile (/. + currentFile);
   candidate = builtins.readFile (/. + candidateFile);
 in

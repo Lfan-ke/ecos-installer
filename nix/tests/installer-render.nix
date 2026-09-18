@@ -3,104 +3,71 @@
   pkgs,
   semver,
   loadModel,
-  generate,
   publish,
-  template,
+  text,
   toolchain,
+  locks,
 }:
 
 let
-  model = loadModel toolchain;
-  text = generate { inherit template model; };
+  sources = {
+    rules = toolchain;
+    inherit locks;
+  };
+  model = loadModel sources;
   v10 = semver.parse "0.1.0-alpha.10";
   v11 = semver.parse "0.1.0-alpha.11";
   vRelease = semver.parse "0.1.0";
 
-  badPlatform = builtins.tryEval (
-    loadModel (
-      toolchain
+  inherit (import ../../lib/testing.nix { inherit lib; })
+    withRules
+    withLocks
+    withSection
+    withLock
+    withPkgs
+    mapPkg
+    ;
+
+  tryModel = f: builtins.tryEval (loadModel (f sources));
+  withPkg = id: f: withPkgs (mapPkg id f);
+
+  badPlatform = tryModel (
+    withRules (
+      t:
+      t
       // {
-        platform = toolchain.platform // {
+        platform = t.platform // {
           os = "darwin";
         };
       }
     )
   );
-  badLiberty = builtins.tryEval (
-    loadModel (
-      toolchain
+  badLiberty = tryModel (withSection "pdk" (p: p // { liberty_files = [ ]; }));
+  badSizerName = tryModel (
+    withLock "sizer" (
+      l:
+      l
       // {
-        pdk = toolchain.pdk // {
-          liberty_files = [ ];
+        src = l.src // {
+          name = "ecc-sizer-linux-x64.tar.gz";
         };
       }
     )
   );
-  badSizerName = builtins.tryEval (
-    loadModel (
-      toolchain
-      // {
-        sizer = toolchain.sizer // {
-          asset_name = "ecc-sizer-linux-x64.tar.gz";
-        };
-      }
+  badSizerSha = tryModel (withLock "sizer" (l: l // { sha256_hex = "not-hex"; }));
+  badSizerVersion = tryModel (withLock "sizer" (l: l // { version = "../evil"; }));
+  badEccVersion = tryModel (withLock "ecc" (l: l // { version = "1..0"; }));
+  straySizerCnbSha = tryModel (
+    withLock "sizer" (
+      l: l // { cnb_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; }
     )
   );
-  badSizerSha = builtins.tryEval (generate {
-    inherit template;
-    model = loadModel (
-      toolchain
-      // {
-        sizer = toolchain.sizer // {
-          sha256 = "not-hex";
-        };
-      }
-    );
-  });
-  badSizerVersion = builtins.tryEval (
-    loadModel (
-      toolchain
-      // {
-        sizer = toolchain.sizer // {
-          version = "../evil";
-          asset_name = "ecc-sizer-../evil-linux-x64.tar.gz";
-        };
-      }
-    )
+  nonBaseCnbSha = tryModel (
+    withPkg "ics55_LLSC_H7CH_liberty" (pkg: pkg // { needs_cnb_sha256 = true; })
   );
-  badEccVersion = builtins.tryEval (
-    loadModel (
-      toolchain
-      // {
-        ecc = toolchain.ecc // {
-          version = "1..0";
-        };
-      }
-    )
-  );
-  badSizerCnbSha = builtins.tryEval (
-    loadModel (
-      toolchain
-      // {
-        sizer = toolchain.sizer // {
-          cnb_sha256 = "not-hex";
-        };
-      }
-    )
-  );
-  orphanSizerCnbSha = builtins.tryEval (
-    loadModel (
-      toolchain
-      // {
-        sizer = toolchain.sizer // {
-          cnb_url = "";
-          cnb_sha256 = toolchain.sizer.sha256;
-        };
-      }
-    )
-  );
+  missingCnbSha = tryModel (withLock "icsprout55-base" (l: builtins.removeAttrs l [ "cnb_sha256" ]));
 
-  older = builtins.replaceStrings [ "0.1.0-alpha.11" ] [ "0.1.0-alpha.10" ] text;
+  older = builtins.replaceStrings [ model.ecc.version ] [ "0.1.0-alpha.10" ] text;
   malformed = "not an installer\n";
   sameVerDiff = builtins.replaceStrings [ "MIN_GLIBC_MAJOR=\"2\"" ] [ "MIN_GLIBC_MAJOR=\"9\"" ] text;
   rejectDiff = builtins.tryEval (
@@ -110,7 +77,7 @@ let
     }
   );
 in
-pkgs.runCommand "ecos-release-generate-check" { } ''
+pkgs.runCommand "ecos-release-installer-render-check" { } ''
   set -euo pipefail
   ${lib.optionalString (semver.compare v10 v11 >= 0) "echo 'semver alpha.10 !< alpha.11' >&2; exit 1"}
   ${lib.optionalString (
@@ -122,13 +89,17 @@ pkgs.runCommand "ecos-release-generate-check" { } ''
   ${lib.optionalString badSizerSha.success "echo 'bad sizer sha256 should fail' >&2; exit 1"}
   ${lib.optionalString badSizerVersion.success "echo 'non-SemVer sizer version should fail' >&2; exit 1"}
   ${lib.optionalString badEccVersion.success "echo 'non-SemVer ecc version should fail' >&2; exit 1"}
-  ${lib.optionalString badSizerCnbSha.success "echo 'bad sizer cnb sha256 should fail' >&2; exit 1"}
-  ${lib.optionalString orphanSizerCnbSha.success "echo 'sizer cnb_sha256 without cnb_url should fail' >&2; exit 1"}
+  ${lib.optionalString straySizerCnbSha.success "echo 'sizer cnb_sha256 without needs_cnb_sha256 should fail' >&2; exit 1"}
+  ${lib.optionalString nonBaseCnbSha.success "echo 'needs_cnb_sha256 on a non-base pdk_pkg should fail' >&2; exit 1"}
+  ${lib.optionalString missingCnbSha.success "echo 'base lock without cnb_sha256 should fail' >&2; exit 1"}
   ${lib.optionalString (!(lib.hasPrefix "#!/bin/sh\n" text)) "echo 'missing shebang' >&2; exit 1"}
   ${lib.optionalString (lib.hasInfix "@ECC_VERSION@" text) "echo 'unsubstituted placeholder' >&2; exit 1"}
   ${lib.optionalString (
-    !(lib.hasInfix ''ECC_VERSION="0.1.0-alpha.11"'' text)
+    !(lib.hasInfix ''ECC_VERSION="${model.ecc.version}"'' text)
   ) "echo 'missing version' >&2; exit 1"}
+  ${lib.optionalString (
+    !(lib.hasInfix ''PDK_VERSION="${model.pdk.version}"'' text)
+  ) "echo 'missing PDK version' >&2; exit 1"}
   ${lib.optionalString (
     !(lib.hasInfix model.ecc.cnbUrl text)
   ) "echo 'missing ECC cnb_url' >&2; exit 1"}

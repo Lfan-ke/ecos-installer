@@ -1,0 +1,26 @@
+name: Check
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+jobs:
+  check:
+    name: Flake checks and registry URL reachability
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes pipe-operators
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+      - name: Run flake checks
+        run: nix flake check
+      - name: Check registry URLs
+        run: |
+          nix build .#tool-registry
+          nix run .#check-registry-urls -- result
