@@ -30,33 +30,37 @@ fi
 versioned="installers/ecc/${tag}/ecc-installer.sh"
 latest="installers/ecc/latest/ecc-installer.sh"
 
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+# Compare exact bytes: routing a body through a shell variable strips the
+# trailing newline and would break every equality check below.
 if ! put_object "$versioned" "$installer" "text/x-sh" "public, max-age=31536000, immutable" 1; then
-  existing="$(get_signed "$versioned" || true)"
-  if ! cmp -s "$installer" <(printf '%s' "$existing"); then
+  get_signed "$versioned" >"$workdir/existing" || true
+  if ! cmp -s "$installer" "$workdir/existing"; then
     echo "refusing to overwrite $versioned with different bytes" >&2
     exit 1
   fi
 fi
 
-anon_versioned="$(curl -fsS "${OSS_PUBLIC_BASE}/${versioned}")"
-if ! cmp -s "$installer" <(printf '%s' "$anon_versioned"); then
+curl -fsS "${OSS_PUBLIC_BASE}/${versioned}" -o "$workdir/anon-versioned"
+if ! cmp -s "$installer" "$workdir/anon-versioned"; then
   echo "anonymous read of $versioned did not match" >&2
   exit 1
 fi
 
-current_file=""
-if current="$(curl -fsS "${OSS_PUBLIC_BASE}/${latest}")"; then
-  current_file="$(mktemp)"
-  printf '%s' "$current" >"$current_file"
+current_file="$workdir/current"
+if curl -fsS "${OSS_PUBLIC_BASE}/${latest}" -o "$current_file"; then
+  decision="$("$PUBLISH_DECIDE" "$current_file" "$installer")"
+else
+  decision="$("$PUBLISH_DECIDE" "" "$installer")"
 fi
-decision="$("$PUBLISH_DECIDE" "${current_file:-}" "$installer")"
-rm -f "$current_file"
 
 case "$decision" in
 advance)
   put_object "$latest" "$installer" "text/x-sh" "no-cache" 0
-  anon_latest="$(curl -fsS "${OSS_PUBLIC_BASE}/${latest}")"
-  if ! cmp -s "$installer" <(printf '%s' "$anon_latest"); then
+  curl -fsS "${OSS_PUBLIC_BASE}/${latest}" -o "$workdir/anon-latest"
+  if ! cmp -s "$installer" "$workdir/anon-latest"; then
     echo "anonymous read of latest did not match" >&2
     exit 1
   fi

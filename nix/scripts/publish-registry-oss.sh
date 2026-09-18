@@ -30,10 +30,15 @@ fi
 
 key="tools/registry.json"
 
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
 put_object "$key" "$registry" "application/json" "no-cache" 0
 
-anon="$(curl -fsS "${OSS_PUBLIC_BASE}/${key}")"
-if ! cmp -s "$registry" <(printf '%s' "$anon"); then
+# Compare exact bytes: routing a body through a shell variable strips the
+# trailing newline and would break the equality check.
+curl -fsS "${OSS_PUBLIC_BASE}/${key}" -o "$workdir/anon"
+if ! cmp -s "$registry" "$workdir/anon"; then
   echo "anonymous read of $key did not match" >&2
   exit 1
 fi

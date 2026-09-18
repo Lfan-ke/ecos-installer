@@ -37,6 +37,7 @@
           pkgs.curl
           pkgs.openssl
           pkgs.coreutils
+          pkgs.diffutils
           pkgs.gnused
           pkgs.nix
         ];

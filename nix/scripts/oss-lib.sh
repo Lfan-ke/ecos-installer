@@ -8,7 +8,10 @@ sign() {
   local date
   date="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S GMT')"
   local canonical
+  # OSS StringToSign is VERB, Content-MD5, Content-Type, Date (one \n each,
+  # empty values included), then CanonicalizedOSSHeaders and the resource.
   canonical="${method}
+
 ${content_type}
 ${date}
 ${oss_header:+${oss_header}
