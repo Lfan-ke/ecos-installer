@@ -254,7 +254,7 @@
     "mpc-frame": {
         "cargoLock": null,
         "cnb_sha256": null,
-        "date": null,
+        "date": "2026-08-27",
         "extract": null,
         "name": "mpc-frame",
         "passthru": null,
@@ -267,7 +267,7 @@
             "type": "url",
             "url": "https://github.com/openecos-projects/mpc-frame/archive/01ac0615e3b6d73db605afaf7c67851ef0cf5767.tar.gz"
         },
-        "version": "0.1.0"
+        "version": "01ac0615e3b6d73db605afaf7c67851ef0cf5767"
     },
     "oss_cad_suite": {
         "cargoLock": null,
@@ -277,15 +277,15 @@
         "name": "oss_cad_suite",
         "passthru": null,
         "pinned": false,
-        "sha256_hex": "c3ffafe1549d5bf321b85e6ac30b3bc6af0af72093d5f45117380bcc0645a8e2",
-        "size": 740836017,
+        "sha256_hex": "fec0e57d9e2a87f218f4ed83f1e10a495c5263fb20e3b40dd8b57fe5ec563197",
+        "size": 742123129,
         "src": {
             "name": null,
-            "sha256": "sha256-w/+v4VSdW/MhuF5qwws7xq8K9yCT1fRRFzgLzAZFqOI=",
+            "sha256": "sha256-/sDlfZ4qh/IY9O2D8eEKSVxSY/sg47QN2LV/5exWMZc=",
             "type": "url",
-            "url": "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-08-27/oss-cad-suite-linux-x64-20260827.tgz"
+            "url": "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-24/oss-cad-suite-linux-x64-20260924.tgz"
         },
-        "version": "2026-08-27"
+        "version": "2026-09-24"
     },
     "riscv-toolchain": {
         "cargoLock": null,
@@ -295,15 +295,15 @@
         "name": "riscv-toolchain",
         "passthru": null,
         "pinned": false,
-        "sha256_hex": "231ba19378a27f19724805cf5e8b5917064ea9b89f87d7829009fd514369e2ef",
-        "size": 540298396,
+        "sha256_hex": "dcfb2234a45f2166e33ae9124dec8b5253e6d08e63be139fc4d0014b2802f964",
+        "size": 539942972,
         "src": {
             "name": null,
-            "sha256": "sha256-Ixuhk3iifxlySAXPXotZFwZOqbifh9eCkAn9UUNp4u8=",
+            "sha256": "sha256-3PsiNKRfIWbjOukSTeyLUlPm0I5jvhOfxNABSygC+WQ=",
             "type": "url",
-            "url": "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2026.06.06/riscv64-elf-ubuntu-22.04-gcc.tar.xz"
+            "url": "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2026.08.27/riscv64-elf-ubuntu-22.04-gcc.tar.xz"
         },
-        "version": "2026.06.06"
+        "version": "2026.08.27"
     },
     "sizer": {
         "cargoLock": null,
@@ -313,15 +313,15 @@
         "name": "sizer",
         "passthru": null,
         "pinned": false,
-        "sha256_hex": "d33a2167600711f35fb1dcef55983b0d669176988d8722ed8b22c03471dafee7",
-        "size": 85803792,
+        "sha256_hex": "cf4960a7452b7fb69b319ece844a9ef579d564541ce5407917e314c6eaa351af",
+        "size": 85807140,
         "src": {
             "name": null,
-            "sha256": "sha256-0zohZ2AHEfNfsdzvVZg7DWaRdpiNhyLtiyLANHHa/uc=",
+            "sha256": "sha256-z0lgp0Urf7abMZ7OhEqe9XnVZFQc5UB5F+MUxuqjUa8=",
             "type": "url",
-            "url": "https://github.com/openecos-projects/ecc-sizer/releases/download/v0.1.0-alpha/ecc-sizer-0.1.0-alpha-linux-x64.tar.gz"
+            "url": "https://github.com/openecos-projects/ecc-sizer/releases/download/v0.1.0-alpha.1/ecc-sizer-0.1.0-alpha.1-linux-x64.tar.gz"
         },
-        "version": "v0.1.0-alpha"
+        "version": "v0.1.0-alpha.1"
     },
     "slang": {
         "cargoLock": null,
